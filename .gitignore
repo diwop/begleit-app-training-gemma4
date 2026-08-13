@@ -1,5 +1,10 @@
 ## Application Specific ##
 
+local/
+images/
+*.sif
+logs/
+
 # HuggingFace & Cache
 .cache/
 huggingface/
