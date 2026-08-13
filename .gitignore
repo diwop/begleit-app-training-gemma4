@@ -1,0 +1,40 @@
+## Application Specific ##
+
+# HuggingFace & Cache
+.cache/
+huggingface/
+
+## Generic ##
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs and Editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Data formats used in training
+*.jsonl
+!data/sample_dataset.jsonl
+*.csv
+*.tsv
+*.parquet
