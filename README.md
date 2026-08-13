@@ -1,5 +1,6 @@
 ---
 train_image: axolotlai/axolotl:0.18.0
+eval_image: vllm/vllm-openai:v0.27.1
 ---
 
 # BegleitApp Training (Gemma 4 on HSUper)

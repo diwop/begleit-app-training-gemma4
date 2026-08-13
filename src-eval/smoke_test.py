@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Smoke test script for Axolotl fine-tuning environment.
-Prints Axolotl version, PyTorch CUDA support, and detailed GPU hardware/VRAM statistics.
+Smoke test script for vLLM evaluation environment.
+Prints vLLM version, PyTorch CUDA support, and detailed GPU hardware/VRAM statistics.
 """
 
-import sys
-import os
-import platform
 import importlib
 import importlib.metadata
+import platform
+import sys
 
 def get_pkg_version(pkg_name: str) -> str:
     """Helper to safely retrieve package version."""
@@ -16,12 +15,12 @@ def get_pkg_version(pkg_name: str) -> str:
         return importlib.metadata.version(pkg_name)
     except importlib.metadata.PackageNotFoundError:
         return "Not Installed"
-    except Exception as e:
+    except (AttributeError, ValueError) as e:
         return f"Error: {e}"
 
-def main():
+def main() -> None:
     print("=" * 60)
-    print("      Axolotl GPU Cluster Environment Smoke Test")
+    print("      vLLM Evaluation Cluster Environment Smoke Test")
     print("=" * 60)
 
     # 1. System & Python Info
@@ -29,52 +28,49 @@ def main():
     print(f"  Python Version : {sys.version.split()[0]}")
     print(f"  Platform       : {platform.platform()}")
 
-    # 2. Axolotl & Core ML Libraries
-    print("\n[ML Core Libraries]")
+    # 2. vLLM & Core Inference Libraries
+    print("\n[Inference Core Libraries]")
     
-    # Try importing axolotl dynamically to prevent local LSP missing import errors
-    axolotl_ver = get_pkg_version("axolotl")
-    if axolotl_ver == "Not Installed":
+    vllm_ver = get_pkg_version("vllm")
+    if vllm_ver == "Not Installed":
         try:
-            axolotl = importlib.import_module("axolotl")
-            axolotl_ver = getattr(axolotl, "__version__", "Installed (unknown version)")
+            vllm = importlib.import_module("vllm")
+            vllm_ver = str(getattr(vllm, "__version__", "Installed (unknown version)"))
         except ImportError:
-            axolotl_ver = "Not Installed / Import Failed"
+            vllm_ver = "Not Installed / Import Failed"
 
-    print(f"  Axolotl        : {axolotl_ver}")
+    print(f"  vLLM           : {vllm_ver}")
     print(f"  Transformers   : {get_pkg_version('transformers')}")
-    print(f"  PEFT           : {get_pkg_version('peft')}")
-    print(f"  Accelerate     : {get_pkg_version('accelerate')}")
-    print(f"  BitsAndBytes   : {get_pkg_version('bitsandbytes')}")
-    print(f"  Triton         : {get_pkg_version('triton')}")
+    print(f"  Ray            : {get_pkg_version('ray')}")
+    print(f"  TrtLLM         : {get_pkg_version('tensorrt_llm')}")
 
     # 3. PyTorch & CUDA Information
     print("\n[PyTorch & CUDA Environment]")
     try:
         torch = importlib.import_module("torch")
-        print(f"  PyTorch        : {torch.__version__}")
-        cuda_available = torch.cuda.is_available()
+        print(f"  PyTorch        : {getattr(torch, '__version__', 'Unknown')}")
+        cuda_available = bool(torch.cuda.is_available())
         print(f"  CUDA Available : {cuda_available}")
         
         if cuda_available:
-            print(f"  CUDA Version   : {torch.version.cuda}")
+            print(f"  CUDA Version   : {getattr(torch.version, 'cuda', 'Unknown')}")
             if hasattr(torch.backends, "cudnn") and torch.backends.cudnn.is_available():
                 print(f"  cuDNN Version  : {torch.backends.cudnn.version()}")
             
-            device_count = torch.cuda.device_count()
+            device_count = int(torch.cuda.device_count())
             print(f"  GPU Count      : {device_count}")
 
             print("\n[GPU Details]")
             for i in range(device_count):
-                device_name = torch.cuda.get_device_name(i)
+                device_name = str(torch.cuda.get_device_name(i))
                 cap = torch.cuda.get_device_capability(i)
                 props = torch.cuda.get_device_properties(i)
-                total_mem_gb = props.total_memory / (1024 ** 3)
+                total_mem_gb = float(props.total_memory / (1024 ** 3))
                 
                 try:
                     free_mem_bytes, _ = torch.cuda.mem_get_info(i)
-                    free_mem_gb = free_mem_bytes / (1024 ** 3)
-                except Exception:
+                    free_mem_gb = float(free_mem_bytes / (1024 ** 3))
+                except (AttributeError, RuntimeError):
                     free_mem_gb = -1.0
 
                 print(f"  --- GPU {i}: {device_name} ---")
