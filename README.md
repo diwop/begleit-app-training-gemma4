@@ -14,6 +14,8 @@ inference on the base model with the tuned adapter.
 
 Training and evaluation is desined for **NVIDIA L40S GPUs** as provided by HSUper.
 
+The actual training data is stored using [DVC](https://dvc.org).
+
 ## Details
 
 See [docs/implementation-details.md](docs/implementation-details.md) for details.

@@ -4,6 +4,8 @@ local/
 images/
 *.sif
 logs/
+.dvc/config.local
+.dvc/tmp
 
 # HuggingFace & Cache
 .cache/
