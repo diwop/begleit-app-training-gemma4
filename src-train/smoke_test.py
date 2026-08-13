@@ -7,6 +7,7 @@ Prints Axolotl version, PyTorch CUDA support, and detailed GPU hardware/VRAM sta
 import sys
 import os
 import platform
+import importlib
 import importlib.metadata
 
 def get_pkg_version(pkg_name: str) -> str:
@@ -31,11 +32,11 @@ def main():
     # 2. Axolotl & Core ML Libraries
     print("\n[ML Core Libraries]")
     
-    # Try importing axolotl
+    # Try importing axolotl dynamically to prevent local LSP missing import errors
     axolotl_ver = get_pkg_version("axolotl")
     if axolotl_ver == "Not Installed":
         try:
-            import axolotl
+            axolotl = importlib.import_module("axolotl")
             axolotl_ver = getattr(axolotl, "__version__", "Installed (unknown version)")
         except ImportError:
             axolotl_ver = "Not Installed / Import Failed"
@@ -51,7 +52,7 @@ def main():
     # 3. PyTorch & CUDA Information
     print("\n[PyTorch & CUDA Environment]")
     try:
-        import torch
+        torch = importlib.import_module("torch")
         print(f"  PyTorch        : {torch.__version__}")
         cuda_available = torch.cuda.is_available()
         print(f"  CUDA Available : {cuda_available}")
@@ -72,7 +73,7 @@ def main():
                 total_mem_gb = props.total_memory / (1024 ** 3)
                 
                 try:
-                    free_mem_bytes, total_mem_bytes = torch.cuda.mem_get_info(i)
+                    free_mem_bytes, _ = torch.cuda.mem_get_info(i)
                     free_mem_gb = free_mem_bytes / (1024 ** 3)
                 except Exception:
                     free_mem_gb = -1.0

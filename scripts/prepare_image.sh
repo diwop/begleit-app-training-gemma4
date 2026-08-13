@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Helper script to pull and prepare the Axolotl Apptainer container on the login node.
+# Dynamically extracts default image from README.md YAML frontmatter ('train_image').
 # Builds a Sandbox Directory container (images/axolotl_sandbox) to bypass mksquashfs/proot limits.
 # NOTE: Run this command on the LOGIN node (hsuper-login01) which has internet access.
 #
@@ -20,7 +21,15 @@ export APPTAINER_TMPDIR="${WORKSPACE_ROOT}/images/.tmp"
 export APPTAINER_CACHEDIR="${WORKSPACE_ROOT}/images/.cache"
 mkdir -p "${APPTAINER_TMPDIR}" "${APPTAINER_CACHEDIR}"
 
-RAW_IMAGE="${1:-${AXOLOTL_DOCKER_IMAGE:-docker://axolotlai/axolotl:0.18.0}}"
+# Dynamically extract default image from README.md frontmatter
+README_FILE="${WORKSPACE_ROOT}/README.md"
+README_IMAGE=""
+if [ -f "${README_FILE}" ]; then
+  README_IMAGE="$(sed -n '/^---$/,/^---$/p' "${README_FILE}" | grep '^train_image:' | head -n 1 | awk -F': ' '{print $2}' | tr -d ' "\r' | sed -e "s/^'//" -e "s/'$//")"
+fi
+
+DEFAULT_IMAGE="${README_IMAGE:-axolotlai/axolotl:main-latest}"
+RAW_IMAGE="${1:-${AXOLOTL_DOCKER_IMAGE:-${DEFAULT_IMAGE}}}"
 
 PURE_IMAGE="${RAW_IMAGE#docker://}"
 DOCKER_URI="docker://${PURE_IMAGE}"
@@ -29,9 +38,10 @@ OUTPUT_DIR="${WORKSPACE_ROOT}/images"
 SANDBOX_DIR="${OUTPUT_DIR}/axolotl_sandbox"
 mkdir -p "${OUTPUT_DIR}"
 
-echo "[INFO] Preparing Apptainer Sandbox Container (bypasses mksquashfs)..."
-echo "[INFO] Source Image : ${DOCKER_URI}"
-echo "[INFO] Target Dir   : ${SANDBOX_DIR}"
+echo "[INFO] Preparing Apptainer Sandbox Container..."
+echo "[INFO] README Source Image : ${README_IMAGE:-N/A (using fallback)}"
+echo "[INFO] Selected Image      : ${DOCKER_URI}"
+echo "[INFO] Target Directory     : ${SANDBOX_DIR}"
 
 # Remove existing sandbox dir if present to allow fresh build
 if [ -d "${SANDBOX_DIR}" ]; then

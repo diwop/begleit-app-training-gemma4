@@ -1,3 +1,7 @@
+---
+train_image: axolotlai/axolotl:0.18.0
+---
+
 # BegleitApp Training (Gemma 4 on HSUper)
 
 This is repository contains code to fine-tune and evaluate adapters for
