@@ -56,20 +56,7 @@ apptainer exec --nv \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --pwd /repo \
   "${VLLM_SANDBOX}" \
-  bash -c '
-    PY_CMD=""
-    for candidate in python3 python /usr/local/bin/python3 /opt/conda/bin/python /usr/bin/python3; do
-      if command -v "$candidate" &>/dev/null || [ -x "$candidate" ]; then
-        PY_CMD="$candidate"
-        break
-      fi
-    done
-    if [ -z "$PY_CMD" ]; then
-      PY_CMD="python3"
-    fi
-    echo "[INFO] Using vLLM Container Python: $PY_CMD"
-    "$PY_CMD" /repo/src-eval/smoke_test.py
-  '
+  /usr/bin/python3 /repo/src-eval/smoke_test.py
 
 echo ""
 echo "============================================================"

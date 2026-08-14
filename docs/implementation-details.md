@@ -298,3 +298,50 @@ To run or reproduce the data preparation stage:
 ```bash
 dvc repro
 ```
+
+---
+
+## 3. Gemma 4 Baseline Evaluation (`src-eval/evaluation.py`)
+
+Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **vLLM** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
+1. **Standard Translation** (`chat_template_kwargs={"enable_thinking": False}`)
+2. **Thinking-Enabled Translation** (`chat_template_kwargs={"enable_thinking": True}`)
+
+Produces `data/results.jsonl` with:
+```json
+{
+  "id": "<id>",
+  "system": "<system-prompt>",
+  "user_input": "<raw input text without template wrapper>",
+  "assistant": "<ground-truth Leichte_Sprache>",
+  "assistant_gemma4": "<gemma4 output without thinking>",
+  "assistant_gemma4_thinking": "<gemma4 output with thinking>"
+}
+```
+
+### Pre-download Model on Login Node (`hsuper-login01`)
+
+Because GPU compute nodes do not have internet access, download the model weights to the shared Hugging Face cache on the login node first:
+
+```bash
+# Optional: Set HF token if accessing gated models
+export HF_TOKEN="hf_..."
+
+# Download model to ~/.cache/huggingface on the shared filesystem
+bash scripts/download_model.sh RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic
+```
+
+### Run Evaluation on GPU Compute Node
+
+#### Option 1: Interactive Node (`salloc`)
+```bash
+salloc --partition=small_gpu8 --gpus 2 --time=00:30:00
+ssh <assigned-gpu-node>
+cd $HOME/begleit-app-training-gemma4
+bash scripts/run_evaluation.sh
+```
+
+#### Option 2: Queue with Slurm (`sbatch`)
+```bash
+sbatch scripts/submit_evaluation.sbatch
+```
