@@ -277,3 +277,24 @@ Because system Python, AWS CLI, and DVC are not pre-installed on the login node 
    ```
 
 Once `dvc pull` finishes, `data/raw/` on the shared filesystem is fully populated and immediately ready for offline GPU training on compute nodes!
+
+---
+
+### Data Preparation Pipeline (`dvc repro`)
+
+A reproducible DVC stage in [dvc.yaml](file:///Users/christophwulf/github/diwop/begleit-app-training-gemma4/dvc.yaml) transforms raw paired text documents and prompt templates into training and evaluation JSONL files:
+
+* **Script**: [src-train/prepare_data.py](file:///Users/christophwulf/github/diwop/begleit-app-training-gemma4/src-train/prepare_data.py)
+* **Dependencies**:
+  - `prompts/system-prompt.md`
+  - `prompts/prompt-template.md`
+  - `data/raw`
+  - `src-train/prepare_data.py`
+* **Outputs**:
+  - `data/dataset_train.jsonl` (90% split, seed 42)
+  - `data/dataset_eval.jsonl` (10% split, seed 42)
+
+To run or reproduce the data preparation stage:
+```bash
+dvc repro
+```
