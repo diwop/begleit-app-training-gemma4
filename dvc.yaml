@@ -1,0 +1,11 @@
+stages:
+  prepare_data:
+    cmd: python3 src-train/prepare_data.py
+    deps:
+      - prompts/system-prompt.md
+      - prompts/prompt-template.md
+      - data/raw
+      - src-train/prepare_data.py
+    outs:
+      - data/dataset_train.jsonl
+      - data/dataset_eval.jsonl
