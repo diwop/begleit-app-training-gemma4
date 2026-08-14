@@ -7,10 +7,10 @@ WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VLLM_CONTAINER_DIR="${WORKSPACE_ROOT}/images/vllm_sandbox"
 CONTAINER_PYTHON="/usr/bin/python3"
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
-MODEL_NAME="${1:-RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic}"
+MODEL_NAME="RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 
 echo "============================================================"
-echo " Downloading Hugging Face Model to Shared Cluster Cache"
+echo " Preparing Evaluation Dependencies & Model Snapshot"
 echo " (Run this on hsuper-login01 where internet is available)"
 echo "============================================================"
 echo "[INFO] Model Name      : ${MODEL_NAME}"
@@ -18,8 +18,17 @@ echo "[INFO] Cache Directory : ${HF_CACHE_DIR}"
 echo "[INFO] Container Python: ${CONTAINER_PYTHON}"
 echo "============================================================"
 
-mkdir -p "${HF_CACHE_DIR}"
+mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local"
 
+# 1. Ensure textstat is installed into user site packages on shared filesystem
+echo "[INFO] Installing/verifying 'textstat' in vLLM environment..."
+apptainer exec \
+  --bind "${HOME}/.local:${HOME}/.local" \
+  "${VLLM_CONTAINER_DIR}" \
+  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir textstat
+
+# 2. Download model snapshot into shared Hugging Face cache
+echo "[INFO] Downloading Hugging Face model snapshot..."
 apptainer exec \
   --env HF_HOME="${HF_CACHE_DIR}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
@@ -39,5 +48,5 @@ print(f'[SUCCESS] Model snapshot downloaded to: {path}')
 "
 
 echo "============================================================"
-echo "[SUCCESS] Model download complete and cached on shared filesystem!"
+echo "[SUCCESS] Model download and evaluation dependencies ready!"
 echo "============================================================"

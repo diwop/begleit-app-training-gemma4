@@ -81,10 +81,16 @@ case "${TARGET}" in
     ;;
   eval)
     build_sandbox "vllm" "${EVAL_IMAGE}"
+    echo "[INFO] Installing 'textstat' in vLLM environment on login node..."
+    mkdir -p "${HOME}/.local"
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/vllm_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir textstat
     ;;
   all)
     build_sandbox "axolotl" "${TRAIN_IMAGE}"
     build_sandbox "vllm" "${EVAL_IMAGE}"
+    echo "[INFO] Installing 'textstat' in vLLM environment on login node..."
+    mkdir -p "${HOME}/.local"
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/vllm_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir textstat
     ;;
   *)
     echo "[ERROR] Unknown target: '${TARGET}'. Usage: $0 [all|train|eval]"

@@ -5,14 +5,20 @@ Evaluates the model twice:
 1. Standard generation (without thinking: chat_template_kwargs={"enable_thinking": False})
 2. Thinking-enabled generation (with thinking: chat_template_kwargs={"enable_thinking": True})
 
+Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts.
+
 Outputs results to data/results.jsonl:
 {
     "id": "<id>",
     "system": "<system-prompt>",
     "user_input": "<raw input text without template wrapper>",
+    "user_input_metrics":  { "fre": <Flesch Reading Score>, "wstf": <Wiener Sachtextformel> },
     "assistant": "<ground-truth Leichte_Sprache>",
+    "assistant_metrics":  { ... },
     "assistant_gemma4": "<gemma4 output without thinking>",
-    "assistant_gemma4_thinking": "<gemma4 output with thinking>"
+    "assistant_gemma4_metrics":  { ... },
+    "assistant_gemma4_thinking": "<gemma4 output with thinking>",
+    "assistant_gemma4_thinking_metrics":  { ... }
 }
 """
 
@@ -23,11 +29,31 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
 
 # Enforce offline mode on cluster compute nodes (no internet access)
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
+# Fix for transformers 5.x heterogeneous model architectures (Gemma 4 per-layer attribute access)
+try:
+    import transformers
+    from transformers.configuration_utils import PretrainedConfig
+    _orig_init = PretrainedConfig.__init__
+    def _patched_init(self, *args, **kwargs):
+        _orig_init(self, *args, **kwargs)
+        self.allow_global_per_layer_attribute_access = True
+    PretrainedConfig.__init__ = _patched_init
+    PretrainedConfig.allow_global_per_layer_attribute_access = True
+except Exception:
+    pass
+
+try:
+    from transformers.integrations.heterogeneity.configuration_utils import HeterogeneousConfig
+    HeterogeneousConfig.allow_global_per_layer_attribute_access = True
+except Exception:
+    pass
 
 import torch
 
@@ -38,86 +64,63 @@ except ImportError:
     print("[INFO] Please run this script inside the vLLM container (images/vllm_sandbox).", file=sys.stderr)
     sys.exit(1)
 
+try:
+    import textstat
+    textstat.set_lang("de")
+except ImportError:
+    textstat = None
+    print("[WARNING] 'textstat' is not installed. Text readability metrics will default to 0.0.", file=sys.stderr)
+
 MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
 
 
-def resolve_model_path(model_name: str) -> str:
-    """Resolve model repo ID to local disk snapshot directory to bypass network lookups."""
-    # 1. Direct path check
+def get_raw_metrics(text: str) -> dict[str, float]:
+    """Calculates German textstat metrics and returns rounded raw floats."""
+    if not text or not text.strip() or textstat is None:
+        return {"fre": 0.0, "wstf": 0.0}
+
+    try:
+        fre = round(float(textstat.flesch_reading_ease(text)), 1)
+    except Exception:
+        fre = 0.0
+
+    try:
+        wstf = round(float(textstat.wiener_sachtextformel(text, 1)), 1)
+    except Exception:
+        wstf = 0.0
+
+    return {"fre": fre, "wstf": wstf}
+
+
+def get_model_snapshot_path(model_name: str) -> str:
+    """Get snapshot directory for model from Hugging Face cache or fail fast."""
     if Path(model_name).exists():
-        print(f"[INFO] Using direct path: {model_name}")
         return model_name
 
+    hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
     repo_folder = "models--" + model_name.replace("/", "--")
-    model_short_name = model_name.split("/")[-1]
+    snapshots_dir = hf_home / "hub" / repo_folder / "snapshots"
 
-    # Candidate Hugging Face cache directories
-    candidate_bases = []
-    if "HF_HOME" in os.environ:
-        candidate_bases.append(Path(os.environ["HF_HOME"]) / "hub")
-        candidate_bases.append(Path(os.environ["HF_HOME"]))
-    
-    candidate_bases.extend([
-        Path.home() / ".cache" / "huggingface" / "hub",
-        Path.home() / ".cache" / "huggingface",
-        Path("/root/.cache/huggingface/hub"),
-        Path("/root/.cache/huggingface"),
-    ])
+    if not snapshots_dir.exists():
+        print(f"[ERROR] Hugging Face cache directory not found at: {snapshots_dir}", file=sys.stderr)
+        print("[INFO] Please run 'bash scripts/download_model.sh' on the login node first.", file=sys.stderr)
+        sys.exit(1)
 
-    # Check parent directory of home (in case running under another username/mount)
-    try:
-        if Path.home().parent.exists():
-            for user_home in Path.home().parent.glob("*"):
-                candidate_bases.append(user_home / ".cache" / "huggingface" / "hub")
-    except Exception:
-        pass
+    snapshots = sorted(
+        [p for p in snapshots_dir.iterdir() if p.is_dir()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not snapshots:
+        print(f"[ERROR] No snapshot directories found inside: {snapshots_dir}", file=sys.stderr)
+        print("[INFO] Please run 'bash scripts/download_model.sh' on the login node first.", file=sys.stderr)
+        sys.exit(1)
 
-    print(f"[INFO] Searching local disk for snapshot of '{model_name}'...")
-
-    for base in candidate_bases:
-        if not base or not base.exists():
-            continue
-
-        # Look for exact repo folder
-        target_dir = base / repo_folder
-        if not target_dir.exists():
-            # Try subfolder if base wasn't hub/
-            target_dir = base / "hub" / repo_folder
-
-        if target_dir.exists():
-            snapshots_dir = target_dir / "snapshots"
-            if snapshots_dir.exists():
-                snapshots = sorted(
-                    [p for p in snapshots_dir.iterdir() if p.is_dir()],
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
-                )
-                if snapshots:
-                    resolved = str(snapshots[0])
-                    print(f"[SUCCESS] Resolved local model snapshot: {resolved}")
-                    return resolved
-
-        # Fallback: glob search in base
-        try:
-            for match in base.glob(f"*{model_short_name}*"):
-                snapshots_dir = match / "snapshots"
-                if snapshots_dir.exists():
-                    snapshots = sorted(
-                        [p for p in snapshots_dir.iterdir() if p.is_dir()],
-                        key=lambda p: p.stat().st_mtime,
-                        reverse=True,
-                    )
-                    if snapshots:
-                        resolved = str(snapshots[0])
-                        print(f"[SUCCESS] Resolved local model snapshot via search: {resolved}")
-                        return resolved
-        except Exception:
-            pass
-
-    print(f"[WARNING] Local snapshot directory not found. Passing '{model_name}' directly.")
-    return model_name
+    resolved_path = str(snapshots[0])
+    print(f"[INFO] Resolved local model snapshot: {resolved_path}")
+    return resolved_path
 
 
 def extract_user_input(user_prompt: str) -> str:
@@ -144,6 +147,8 @@ def load_eval_data(path: Path) -> list[dict[str, str]]:
 
 
 def main() -> None:
+    overall_start_time = time.time()
+
     print("=" * 60)
     print("      Gemma 4 Baseline Evaluation (vLLM)")
     print("=" * 60)
@@ -152,24 +157,31 @@ def main() -> None:
     print(f"[INFO] Output Results   : {RESULTS_OUTPUT_PATH}")
 
     gpu_count = torch.cuda.device_count()
-    tensor_parallel_size = max(1, gpu_count)
-    print(f"[INFO] Detected GPUs    : {gpu_count} (Tensor Parallel Size: {tensor_parallel_size})")
+    tensor_parallel_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
+    print(f"[INFO] Detected GPUs    : {gpu_count} (Using Tensor Parallel Size: {tensor_parallel_size})")
 
     records = load_eval_data(EVAL_DATA_PATH)
     print(f"[INFO] Loaded {len(records)} evaluation samples.")
 
-    # Resolve local offline snapshot path on disk
-    model_path = resolve_model_path(MODEL_NAME)
+    # Get local offline snapshot path on disk (fail fast if missing)
+    model_path = get_model_snapshot_path(MODEL_NAME)
 
     # Initialize vLLM model
-    print(f"\n[INFO] Loading model into vLLM engine from: {model_path}")
+    print(f"\n[INFO] Initializing vLLM engine and loading model weights from: {model_path}")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    model_load_start = time.time()
+
     llm = LLM(
         model=model_path,
         tensor_parallel_size=tensor_parallel_size,
         trust_remote_code=True,
         gpu_memory_utilization=0.90,
         max_model_len=8192,
+        disable_log_stats=False,
     )
+
+    model_load_elapsed = time.time() - model_load_start
+    print(f"[SUCCESS] vLLM engine & weights ready in {model_load_elapsed:.1f}s ({time.strftime('%Y-%m-%d %H:%M:%S')})\n")
 
     # Standard chat conversations for both passes
     conversations = [
@@ -191,7 +203,12 @@ def main() -> None:
         max_tokens=8192,
     )
 
-    print("\n[STEP 1/2] Running inference WITHOUT thinking (enable_thinking=False)...")
+    # STEP 1: Standard Inference
+    print("=" * 60)
+    print(f"[STEP 1/2] Running inference WITHOUT thinking (enable_thinking=False) for {len(records)} samples...")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    step1_start = time.time()
+
     no_thinking_outputs = llm.chat(
         messages=conversations,
         sampling_params=sampling_params_no_thinking,
@@ -199,7 +216,15 @@ def main() -> None:
         use_tqdm=True,
     )
 
-    print("\n[STEP 2/2] Running inference WITH thinking (enable_thinking=True)...")
+    step1_elapsed = time.time() - step1_start
+    print(f"[SUCCESS] Step 1 completed in {step1_elapsed:.1f}s ({step1_elapsed/len(records):.2f}s/sample)\n")
+
+    # STEP 2: Thinking-Enabled Inference
+    print("=" * 60)
+    print(f"[STEP 2/2] Running inference WITH thinking (enable_thinking=True) for {len(records)} samples...")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    step2_start = time.time()
+
     thinking_outputs = llm.chat(
         messages=conversations,
         sampling_params=sampling_params_thinking,
@@ -207,22 +232,49 @@ def main() -> None:
         use_tqdm=True,
     )
 
-    print(f"\n[INFO] Assembling and writing results to {RESULTS_OUTPUT_PATH}...")
+    step2_elapsed = time.time() - step2_start
+    print(f"[SUCCESS] Step 2 completed in {step2_elapsed:.1f}s ({step2_elapsed/len(records):.2f}s/sample)\n")
+
+    # Calculate metrics and assemble results
+    print("=" * 60)
+    print(f"[INFO] Calculating German readability metrics (FRE & WSTF)...")
     RESULTS_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     results = []
+    fre_scores = {"input": [], "ground_truth": [], "gemma4": [], "gemma4_thinking": []}
+    wstf_scores = {"input": [], "ground_truth": [], "gemma4": [], "gemma4_thinking": []}
+
     for idx, rec in enumerate(records):
         out_no_thinking = no_thinking_outputs[idx].outputs[0].text.strip()
         out_thinking = thinking_outputs[idx].outputs[0].text.strip()
         raw_user_input = extract_user_input(rec["user"])
 
+        user_metrics = get_raw_metrics(raw_user_input)
+        assistant_metrics = get_raw_metrics(rec["assistant"])
+        gemma4_metrics = get_raw_metrics(out_no_thinking)
+        gemma4_thinking_metrics = get_raw_metrics(out_thinking)
+
+        fre_scores["input"].append(user_metrics["fre"])
+        fre_scores["ground_truth"].append(assistant_metrics["fre"])
+        fre_scores["gemma4"].append(gemma4_metrics["fre"])
+        fre_scores["gemma4_thinking"].append(gemma4_thinking_metrics["fre"])
+
+        wstf_scores["input"].append(user_metrics["wstf"])
+        wstf_scores["ground_truth"].append(assistant_metrics["wstf"])
+        wstf_scores["gemma4"].append(gemma4_metrics["wstf"])
+        wstf_scores["gemma4_thinking"].append(gemma4_thinking_metrics["wstf"])
+
         result_entry = {
             "id": rec["id"],
             "system": rec["system"],
             "user_input": raw_user_input,
+            "user_input_metrics": user_metrics,
             "assistant": rec["assistant"],
+            "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,
+            "assistant_gemma4_metrics": gemma4_metrics,
             "assistant_gemma4_thinking": out_thinking,
+            "assistant_gemma4_thinking_metrics": gemma4_thinking_metrics,
         }
         results.append(result_entry)
 
@@ -230,7 +282,28 @@ def main() -> None:
         for entry in results:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    print(f"[SUCCESS] Wrote {len(results)} evaluated results to {RESULTS_OUTPUT_PATH}")
+    overall_elapsed = time.time() - overall_start_time
+
+    print(f"[SUCCESS] Wrote {len(results)} evaluated results with textstat metrics to: {RESULTS_OUTPUT_PATH}")
+    print("=" * 60)
+    print("      Evaluation Summary Metrics (Dataset Averages)")
+    print("=" * 60)
+    if fre_scores["input"] and sum(fre_scores["input"]) > 0:
+        avg_in_fre = sum(fre_scores["input"]) / len(results)
+        avg_gt_fre = sum(fre_scores["ground_truth"]) / len(results)
+        avg_g4_fre = sum(fre_scores["gemma4"]) / len(results)
+        avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / len(results)
+
+        avg_in_wstf = sum(wstf_scores["input"]) / len(results)
+        avg_gt_wstf = sum(wstf_scores["ground_truth"]) / len(results)
+        avg_g4_wstf = sum(wstf_scores["gemma4"]) / len(results)
+        avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / len(results)
+
+        print(f"  * Input Standardsprache  : FRE = {avg_in_fre:.1f}  |  WSTF = {avg_in_wstf:.1f}")
+        print(f"  * Ground Truth (Target)  : FRE = {avg_gt_fre:.1f}  |  WSTF = {avg_gt_wstf:.1f}")
+        print(f"  * Gemma 4 (No Thinking)  : FRE = {avg_g4_fre:.1f}  |  WSTF = {avg_g4_wstf:.1f}")
+        print(f"  * Gemma 4 (With Thinking): FRE = {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}")
+    print(f"  * Total Evaluation Time  : {overall_elapsed:.1f}s")
     print("=" * 60)
 
 

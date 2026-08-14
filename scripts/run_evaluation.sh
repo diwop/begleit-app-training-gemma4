@@ -23,7 +23,7 @@ if [ ! -d "${VLLM_CONTAINER_DIR}" ]; then
   exit 1
 fi
 
-mkdir -p "${HF_CACHE_DIR}"
+mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local"
 
 # Execute evaluation.py inside the vLLM container in offline mode
 apptainer exec \
@@ -34,6 +34,7 @@ apptainer exec \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --bind "${HF_CACHE_DIR}:${HF_CACHE_DIR}" \
   --bind "${HF_CACHE_DIR}:/root/.cache/huggingface" \
+  --bind "${HOME}/.local:${HOME}/.local" \
   --pwd /repo \
   "${VLLM_CONTAINER_DIR}" \
   "${CONTAINER_PYTHON}" /repo/src-eval/evaluation.py

@@ -250,33 +250,21 @@ To upload raw dataset files from your local machine to the remote S3 bucket:
 
 > **IMPORTANT**: Run `dvc pull` on the **login node** (`hsuper-login01`), as compute nodes do not have outbound internet access.
 
-Because system Python, AWS CLI, and DVC are not pre-installed on the login node host OS, the **recommended method** is to use **Apptainer** with a workspace virtual environment (`.dvc-venv`).
+Use the helper script [`scripts/pull_data.sh`](file:///Users/christophwulf/github/diwop/begleit-app-training-gemma4/scripts/pull_data.sh) which automatically manages the workspace virtual environment and pulls all DVC data from S3:
 
-#### Step-by-Step Execution on `hsuper-login01`:
+```bash
+# 1. SSH to HSUper login node
+ssh <hsu-name>@hsuper-login01.hsu-hh.de
 
-1. **SSH to HSUper login node**:
-   ```bash
-   ssh <hsu-name>@hsuper-login01.hsu-hh.de
-   ```
+# 2. Navigate to repo and pull Git changes
+cd $HOME/begleit-app-training-gemma4
+git pull
 
-2. **Navigate to repository and pull latest Git changes**:
-   ```bash
-   cd $HOME/begleit-app-training-gemma4
-   git pull
-   ```
+# 3. Pull dataset files from AWS S3
+bash scripts/pull_data.sh
+```
 
-3. **Initialize workspace DVC environment (one-time setup)**:
-   ```bash
-   apptainer exec --bind "$PWD:/repo" --pwd /repo images/axolotl_sandbox uv venv /repo/.dvc-venv
-   apptainer exec --bind "$PWD:/repo" --pwd /repo images/axolotl_sandbox uv pip install --python /repo/.dvc-venv "dvc[s3]"
-   ```
-
-4. **Pull dataset files from AWS S3**:
-   ```bash
-   apptainer exec --bind "$PWD:/repo" --pwd /repo images/axolotl_sandbox /repo/.dvc-venv/bin/dvc pull
-   ```
-
-Once `dvc pull` finishes, `data/raw/` on the shared filesystem is fully populated and immediately ready for offline GPU training on compute nodes!
+Once `pull_data.sh` finishes, `data/raw/` (and generated dataset files) on the shared filesystem are fully populated and immediately ready for offline GPU training on compute nodes!
 
 ---
 
@@ -307,15 +295,19 @@ Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using *
 1. **Standard Translation** (`chat_template_kwargs={"enable_thinking": False}`)
 2. **Thinking-Enabled Translation** (`chat_template_kwargs={"enable_thinking": True}`)
 
-Produces `data/results.jsonl` with:
+Produces `data/results.jsonl` with German textstat readability metrics (`fre` = Flesch Reading Ease, `wstf` = Wiener Sachtextformel):
 ```json
 {
   "id": "<id>",
   "system": "<system-prompt>",
   "user_input": "<raw input text without template wrapper>",
+  "user_input_metrics": { "fre": 45.2, "wstf": 11.4 },
   "assistant": "<ground-truth Leichte_Sprache>",
+  "assistant_metrics": { "fre": 88.5, "wstf": 4.1 },
   "assistant_gemma4": "<gemma4 output without thinking>",
-  "assistant_gemma4_thinking": "<gemma4 output with thinking>"
+  "assistant_gemma4_metrics": { "fre": 82.1, "wstf": 5.2 },
+  "assistant_gemma4_thinking": "<gemma4 output with thinking>",
+  "assistant_gemma4_thinking_metrics": { "fre": 85.3, "wstf": 4.6 }
 }
 ```
 
@@ -328,14 +320,14 @@ Because GPU compute nodes do not have internet access, download the model weight
 export HF_TOKEN="hf_..."
 
 # Download model to ~/.cache/huggingface on the shared filesystem
-bash scripts/download_model.sh RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic
+bash scripts/download_model.sh
 ```
 
 ### Run Evaluation on GPU Compute Node
 
 #### Option 1: Interactive Node (`salloc`)
 ```bash
-salloc --partition=small_gpu8 --gpus 2 --time=00:30:00
+salloc --partition=small_gpu8 --gpus 1 --time=00:30:00
 ssh <assigned-gpu-node>
 cd $HOME/begleit-app-training-gemma4
 bash scripts/run_evaluation.sh
