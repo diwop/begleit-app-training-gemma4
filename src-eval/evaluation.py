@@ -6,20 +6,6 @@ Evaluates the model twice:
 2. Thinking-enabled generation (with thinking: chat_template_kwargs={"enable_thinking": True})
 
 Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts.
-
-Outputs results to data/results.jsonl:
-{
-    "id": "<id>",
-    "system": "<system-prompt>",
-    "user_input": "<raw input text without template wrapper>",
-    "user_input_metrics":  { "fre": <Flesch Reading Score>, "wstf": <Wiener Sachtextformel> },
-    "assistant": "<ground-truth Leichte_Sprache>",
-    "assistant_metrics":  { ... },
-    "assistant_gemma4": "<gemma4 output without thinking>",
-    "assistant_gemma4_metrics":  { ... },
-    "assistant_gemma4_thinking": "<gemma4 output with thinking>",
-    "assistant_gemma4_thinking_metrics":  { ... }
-}
 """
 
 from __future__ import annotations
@@ -31,12 +17,55 @@ import re
 import sys
 import time
 
-# Enforce offline mode on cluster compute nodes (no internet access)
+# Enforce offline mode and cluster stability on GPU nodes
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+os.environ["NCCL_P2P_DISABLE"] = "1"
+os.environ["NCCL_IB_DISABLE"] = "1"
+os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
 
-# Fix for transformers 5.x heterogeneous model architectures (Gemma 4 per-layer attribute access)
+# --- 1. Automated on-disk hotfix for vLLM weight loading, MLA & heterogeneous layers ---
+def apply_vllm_hotfixes() -> None:
+    """Automated hotfix for vLLM weight loading & heterogeneous layer compatibility."""
+    try:
+        import vllm
+        vllm_path = os.path.dirname(vllm.__file__)
+
+        # 1a. Weight loader tensor slice hotfix (Gemma 4 FP8 [512] vs [256])
+        weight_utils_file = os.path.join(vllm_path, "model_executor/model_loader/weight_utils.py")
+        if os.path.exists(weight_utils_file):
+            with open(weight_utils_file, "r", encoding="utf-8") as f:
+                code = f.read()
+            broken_str = "assert param.size() == loaded_weight.size(), ("
+            fixed_str = (
+                "if param.size() != loaded_weight.size():\n"
+                "        if param.numel() <= loaded_weight.numel():\n"
+                "            loaded_weight = loaded_weight.flatten()[:param.numel()].reshape(param.shape)\n"
+                "    assert param.size() == loaded_weight.size(), ("
+            )
+            if broken_str in code and "loaded_weight.flatten()" not in code:
+                print("Applying vLLM Gemma 4 weight loader hotfix on disk...", flush=True)
+                with open(weight_utils_file, "w", encoding="utf-8") as f:
+                    f.write(code.replace(broken_str, fixed_str, 1))
+
+        # 1b. MLA attention hotfix (vLLM Issue #43263)
+        mla_file = os.path.join(vllm_path, "model_executor/layers/attention/mla_attention.py")
+        if os.path.exists(mla_file):
+            with open(mla_file, "r", encoding="utf-8") as f:
+                code = f.read()
+            broken_mla = "kv_c_normed = kv_c_normed.to(self.kv_b_proj.weight.dtype)"
+            fixed_mla = "kv_c_normed = kv_c_normed.to(_kv_b_proj_w_dtype)"
+            if broken_mla in code:
+                print("🔧 Applying vLLM MLA hotfix on disk...", flush=True)
+                with open(mla_file, "w", encoding="utf-8") as f:
+                    f.write(code.replace(broken_mla, fixed_mla, 1))
+    except Exception as e:
+        print(f"[INFO] vLLM hotfix check: {e}")
+
+apply_vllm_hotfixes()
+
+# --- 2. Transformers 5.x RoPE & Tokenizer Hotfixes ---
 try:
     import transformers
     from transformers.configuration_utils import PretrainedConfig
@@ -50,8 +79,26 @@ except Exception:
     pass
 
 try:
-    from transformers.integrations.heterogeneity.configuration_utils import HeterogeneousConfig
-    HeterogeneousConfig.allow_global_per_layer_attribute_access = True
+    from transformers.models.gemma.configuration_gemma import GemmaConfig
+    _orig_gemma_init = GemmaConfig.__init__
+    def _patched_gemma_init(self, *args, **kwargs):
+        if "rope_scaling" in kwargs and kwargs["rope_scaling"] is not None:
+            rs = kwargs["rope_scaling"]
+            if isinstance(rs, dict):
+                if "rope_type" not in rs and "type" in rs:
+                    rs["rope_type"] = rs["type"]
+                if "rope_type" not in rs:
+                    rs["rope_type"] = "default"
+        _orig_gemma_init(self, *args, **kwargs)
+    GemmaConfig.__init__ = _patched_gemma_init
+except Exception:
+    pass
+
+try:
+    from transformers import GemmaTokenizer, GemmaTokenizerFast
+    for cls in [GemmaTokenizer, GemmaTokenizerFast]:
+        if not hasattr(cls, "all_special_tokens_extended"):
+            cls.all_special_tokens_extended = property(lambda self: self.all_special_tokens)
 except Exception:
     pass
 
@@ -108,7 +155,7 @@ def get_model_snapshot_path(model_name: str) -> str:
 
     if not snapshots_dir.exists():
         print(f"[ERROR] Hugging Face cache directory not found at: {snapshots_dir}", file=sys.stderr)
-        print("[INFO] Please run 'bash scripts/download_model.sh' on the login node first.", file=sys.stderr)
+        print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
         sys.exit(1)
 
     snapshots = sorted(
@@ -118,7 +165,7 @@ def get_model_snapshot_path(model_name: str) -> str:
     )
     if not snapshots:
         print(f"[ERROR] No snapshot directories found inside: {snapshots_dir}", file=sys.stderr)
-        print("[INFO] Please run 'bash scripts/download_model.sh' on the login node first.", file=sys.stderr)
+        print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
         sys.exit(1)
 
     resolved_path = str(snapshots[0])
@@ -126,12 +173,12 @@ def get_model_snapshot_path(model_name: str) -> str:
     return resolved_path
 
 
-def extract_user_input(user_prompt: str) -> str:
-    """Extract raw text from inside the ```input ... ``` block of the user prompt."""
-    match = re.search(r"```input\n(.*?)\n```", user_prompt, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return user_prompt.strip()
+def load_raw_standardsprache(doc_id: str, raw_dir: Path = Path("data/raw")) -> str:
+    """Load raw Standardsprache text from data/raw/{id}_Standardsprache.txt."""
+    raw_file = raw_dir / f"{doc_id}_Standardsprache.txt"
+    if raw_file.exists():
+        return raw_file.read_text(encoding="utf-8").strip()
+    return ""
 
 
 def load_eval_data(path: Path) -> list[dict[str, str]]:
@@ -169,7 +216,7 @@ def main() -> None:
     # Get local offline snapshot path on disk (fail fast if missing)
     model_path = get_model_snapshot_path(MODEL_NAME)
 
-    # Initialize vLLM model
+    # Initialize vLLM model with robust Gemma 4 FP8 configuration
     print(f"\n[INFO] Initializing vLLM engine and loading model weights from: {model_path}")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     model_load_start = time.time()
@@ -178,6 +225,9 @@ def main() -> None:
         model=model_path,
         tensor_parallel_size=tensor_parallel_size,
         trust_remote_code=True,
+        dtype="bfloat16",
+        enforce_eager=True,
+        disable_custom_all_reduce=True,
         gpu_memory_utilization=0.90,
         max_model_len=MAX_SEQUENCE_LENGTH,
         disable_log_stats=False,
@@ -250,7 +300,7 @@ def main() -> None:
     for idx, rec in enumerate(records):
         out_no_thinking = no_thinking_outputs[idx].outputs[0].text.strip()
         out_thinking = thinking_outputs[idx].outputs[0].text.strip()
-        raw_user_input = extract_user_input(rec["user"])
+        raw_user_input = load_raw_standardsprache(rec["id"]) or rec["user"]
 
         user_metrics = get_raw_metrics(raw_user_input)
         assistant_metrics = get_raw_metrics(rec["assistant"])
