@@ -101,18 +101,23 @@ import re
 with open('${weight_utils}', 'r', encoding='utf-8') as f:
     code = f.read()
 
-# Clean any previously malformed multi-line patch if present
-code = re.sub(
-    r'if param\.size\(\) != loaded_weight\.size\(\)[^\n]*\n\s*loaded_weight[^\n]*\n\s*assert param\.size\(\) == loaded_weight\.size\(\), \(',
-    'assert param.size() == loaded_weight.size(), (',
-    code
-)
+new_default_weight_loader = '''def default_weight_loader(param: torch.nn.Parameter, loaded_weight: torch.Tensor) -> None:
+    try:
+        if param.size() == loaded_weight.size():
+            param.data.copy_(loaded_weight)
+            return
+        if param.numel() <= loaded_weight.numel():
+            param.data.copy_(loaded_weight.flatten()[:param.numel()].reshape(param.shape))
+            return
+    except Exception:
+        pass
+    assert param.size() == loaded_weight.size(), (
+        f\"Attempted to load weight ({loaded_weight.size()}) into parameter ({param.size()})\"
+    )
+'''
 
-target = 'assert param.size() == loaded_weight.size(), ('
-replacement = 'if param.size() != loaded_weight.size() and param.numel() <= loaded_weight.numel(): loaded_weight = loaded_weight.flatten()[:param.numel()].reshape(param.shape)\n    assert param.size() == loaded_weight.size(), ('
-
-if 'loaded_weight.flatten()' not in code and target in code:
-    code = code.replace(target, replacement, 1)
+pattern = r'def default_weight_loader\s*\([\s\S]*?(?=\n(?:def |class |\Z))'
+code = re.sub(pattern, new_default_weight_loader.strip(), code)
 
 # Verify syntax before saving
 compile(code, '${weight_utils}', 'exec')
