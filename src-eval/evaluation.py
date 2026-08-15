@@ -4,6 +4,7 @@ Runs baseline evaluation for RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic on data/dat
 Evaluates the model twice:
 1. Standard generation (without thinking: chat_template_kwargs={"enable_thinking": False})
 2. Thinking-enabled generation (with thinking: chat_template_kwargs={"enable_thinking": True})
+   with calibrated sampling (temperature=1.0, top_p=0.95, top_k=64, skip_special_tokens=False)
 
 Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts.
 """
@@ -24,83 +25,6 @@ os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["NCCL_P2P_DISABLE"] = "1"
 os.environ["NCCL_IB_DISABLE"] = "1"
 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
-
-# --- 1. Automated on-disk hotfix for vLLM weight loading, MLA & heterogeneous layers ---
-def apply_vllm_hotfixes() -> None:
-    """Automated hotfix for vLLM weight loading & heterogeneous layer compatibility."""
-    try:
-        import vllm
-        vllm_path = os.path.dirname(vllm.__file__)
-
-        # 1a. Weight loader tensor slice hotfix (Gemma 4 FP8 [512] vs [256])
-        weight_utils_file = os.path.join(vllm_path, "model_executor/model_loader/weight_utils.py")
-        if os.path.exists(weight_utils_file):
-            with open(weight_utils_file, "r", encoding="utf-8") as f:
-                code = f.read()
-            broken_str = "assert param.size() == loaded_weight.size(), ("
-            fixed_str = (
-                "if param.size() != loaded_weight.size():\n"
-                "        if param.numel() <= loaded_weight.numel():\n"
-                "            loaded_weight = loaded_weight.flatten()[:param.numel()].reshape(param.shape)\n"
-                "    assert param.size() == loaded_weight.size(), ("
-            )
-            if broken_str in code and "loaded_weight.flatten()" not in code:
-                print("Applying vLLM Gemma 4 weight loader hotfix on disk...", flush=True)
-                with open(weight_utils_file, "w", encoding="utf-8") as f:
-                    f.write(code.replace(broken_str, fixed_str, 1))
-
-        # 1b. MLA attention hotfix (vLLM Issue #43263)
-        mla_file = os.path.join(vllm_path, "model_executor/layers/attention/mla_attention.py")
-        if os.path.exists(mla_file):
-            with open(mla_file, "r", encoding="utf-8") as f:
-                code = f.read()
-            broken_mla = "kv_c_normed = kv_c_normed.to(self.kv_b_proj.weight.dtype)"
-            fixed_mla = "kv_c_normed = kv_c_normed.to(_kv_b_proj_w_dtype)"
-            if broken_mla in code:
-                print("🔧 Applying vLLM MLA hotfix on disk...", flush=True)
-                with open(mla_file, "w", encoding="utf-8") as f:
-                    f.write(code.replace(broken_mla, fixed_mla, 1))
-    except Exception as e:
-        print(f"[INFO] vLLM hotfix check: {e}")
-
-apply_vllm_hotfixes()
-
-# --- 2. Transformers 5.x RoPE & Tokenizer Hotfixes ---
-try:
-    import transformers
-    from transformers.configuration_utils import PretrainedConfig
-    _orig_init = PretrainedConfig.__init__
-    def _patched_init(self, *args, **kwargs):
-        _orig_init(self, *args, **kwargs)
-        self.allow_global_per_layer_attribute_access = True
-    PretrainedConfig.__init__ = _patched_init
-    PretrainedConfig.allow_global_per_layer_attribute_access = True
-except Exception:
-    pass
-
-try:
-    from transformers.models.gemma.configuration_gemma import GemmaConfig
-    _orig_gemma_init = GemmaConfig.__init__
-    def _patched_gemma_init(self, *args, **kwargs):
-        if "rope_scaling" in kwargs and kwargs["rope_scaling"] is not None:
-            rs = kwargs["rope_scaling"]
-            if isinstance(rs, dict):
-                if "rope_type" not in rs and "type" in rs:
-                    rs["rope_type"] = rs["type"]
-                if "rope_type" not in rs:
-                    rs["rope_type"] = "default"
-        _orig_gemma_init(self, *args, **kwargs)
-    GemmaConfig.__init__ = _patched_gemma_init
-except Exception:
-    pass
-
-try:
-    from transformers import GemmaTokenizer, GemmaTokenizerFast
-    for cls in [GemmaTokenizer, GemmaTokenizerFast]:
-        if not hasattr(cls, "all_special_tokens_extended"):
-            cls.all_special_tokens_extended = property(lambda self: self.all_special_tokens)
-except Exception:
-    pass
 
 import torch
 
@@ -124,6 +48,22 @@ MAX_SEQUENCE_LENGTH = 8192
 MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
+
+
+def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
+    """
+    Extracts reasoning trace and final clean text from Gemma 4 thinking output.
+    Returns: (reasoning_trace, clean_output)
+    """
+    pattern = r"<\|channel>thought\s*(.*?)(?:<channel\|>|$)"
+    match = re.search(pattern, text, flags=re.DOTALL)
+
+    if match:
+        reasoning = match.group(1).strip()
+        clean_text = re.sub(pattern, "", text, flags=re.DOTALL).strip()
+        return reasoning, clean_text
+
+    return "", text.strip()
 
 
 def get_raw_metrics(text: str) -> dict[str, float]:
@@ -245,15 +185,20 @@ def main() -> None:
         for rec in records
     ]
 
-    # Sampling parameters
+    # Sampling parameters:
+    # Pass 1: Zero-Shot Greedy (temperature=0.0)
     sampling_params_no_thinking = SamplingParams(
         temperature=0.0,
         max_tokens=4096,
     )
 
+    # Pass 2: Calibrated Thinking Mode (temperature=1.0, top_p=0.95, top_k=64, retaining special tokens)
     sampling_params_thinking = SamplingParams(
-        temperature=0.0,
+        temperature=1.0,
+        top_p=0.95,
+        top_k=64,
         max_tokens=8192,
+        skip_special_tokens=False,
     )
 
     # STEP 1: Standard Inference
@@ -274,7 +219,7 @@ def main() -> None:
 
     # STEP 2: Thinking-Enabled Inference
     print("=" * 60)
-    print(f"[STEP 2/2] Running inference WITH thinking (enable_thinking=True) for {len(records)} samples...")
+    print(f"[STEP 2/2] Running inference WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step2_start = time.time()
 
@@ -299,7 +244,9 @@ def main() -> None:
 
     for idx, rec in enumerate(records):
         out_no_thinking = no_thinking_outputs[idx].outputs[0].text.strip()
-        out_thinking = thinking_outputs[idx].outputs[0].text.strip()
+        raw_thinking_output = thinking_outputs[idx].outputs[0].text.strip()
+        reasoning_trace, out_thinking = extract_gemma4_reasoning(raw_thinking_output)
+
         raw_user_input = load_raw_standardsprache(rec["id"]) or rec["user"]
 
         user_metrics = get_raw_metrics(raw_user_input)
@@ -326,6 +273,7 @@ def main() -> None:
             "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,
             "assistant_gemma4_metrics": gemma4_metrics,
+            "assistant_gemma4_thinking_reasoning": reasoning_trace,
             "assistant_gemma4_thinking": out_thinking,
             "assistant_gemma4_thinking_metrics": gemma4_thinking_metrics,
         }
