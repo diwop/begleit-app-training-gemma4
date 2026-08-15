@@ -3,16 +3,33 @@ Python startup hook (sitecustomize) automatically loaded by Python in all proces
 (including spawned multiprocessing worker processes in vLLM).
 
 Applies compatibility patches for Gemma 4 FP8 and Transformers 5.x:
-1. Weight loader shape slicing for 1D FP8 tensors ([512] vs [256])
-2. Transformers 5.x PretrainedConfig per-layer attribute access
-3. Gemma RoPE scaling dictionary schema ('rope_type' vs 'type')
-4. GemmaTokenizer special tokens extended attribute
+1. Safe tensor narrowing for heterogeneous QKV projection layers ([2048] vs [1024])
+2. Weight loader shape slicing for 1D FP8 tensors ([512] vs [256])
+3. Defensive fallback for ColumnvLLMParameter.load_qkv_weight
+4. Transformers 5.x PretrainedConfig per-layer attribute access
+5. Gemma RoPE scaling dictionary schema ('rope_type' vs 'type')
+6. GemmaTokenizer special tokens extended attribute
 """
 
 import sys
+import torch
 
+# 1. Safe torch.Tensor.narrow for heterogeneous QKV layers (Gemma 4 sliding window vs global layers)
 try:
-    import torch
+    _orig_narrow = torch.Tensor.narrow
+
+    def _safe_narrow(self, dim: int, start: int, length: int) -> torch.Tensor:
+        dim_size = self.size(dim)
+        if start + length > dim_size:
+            length = max(0, dim_size - start)
+        return _orig_narrow(self, dim, start, length)
+
+    torch.Tensor.narrow = _safe_narrow
+except Exception:
+    pass
+
+# 2. Defensive weight loader for 1D shape mismatches
+try:
     import vllm.model_executor.model_loader.weight_utils as weight_utils
 
     _orig_default_weight_loader = weight_utils.default_weight_loader
@@ -44,22 +61,55 @@ try:
 except Exception:
     pass
 
-# Transformers 5.x PretrainedConfig per-layer attribute access
+# 3. Defensive load_qkv_weight for parameter loading
+try:
+    import vllm.model_executor.parameter as param_module
+
+    for attr_name in dir(param_module):
+        cls = getattr(param_module, attr_name)
+        if isinstance(cls, type) and hasattr(cls, "load_qkv_weight"):
+            _orig_qkv = cls.load_qkv_weight
+
+            def make_safe_qkv(orig_fn):
+                def _safe_qkv(self, loaded_weight, *args, **kwargs):
+                    try:
+                        return orig_fn(self, loaded_weight, *args, **kwargs)
+                    except RuntimeError as e:
+                        if "exceeds dimension size" in str(e):
+                            if hasattr(self, "data"):
+                                if self.data.numel() == loaded_weight.numel():
+                                    self.data.copy_(loaded_weight.reshape(self.data.shape))
+                                    return
+                                elif self.data.numel() >= loaded_weight.numel():
+                                    self.data.flatten()[:loaded_weight.numel()].copy_(loaded_weight.flatten())
+                                    return
+                        raise e
+
+                return _safe_qkv
+
+            cls.load_qkv_weight = make_safe_qkv(_orig_qkv)
+except Exception:
+    pass
+
+# 4. Transformers 5.x PretrainedConfig per-layer attribute access
 try:
     from transformers.configuration_utils import PretrainedConfig
     _orig_init = PretrainedConfig.__init__
+
     def _patched_init(self, *args, **kwargs):
         _orig_init(self, *args, **kwargs)
         self.allow_global_per_layer_attribute_access = True
+
     PretrainedConfig.__init__ = _patched_init
     PretrainedConfig.allow_global_per_layer_attribute_access = True
 except Exception:
     pass
 
-# RoPE scaling schema compatibility
+# 5. RoPE scaling schema compatibility
 try:
     from transformers.models.gemma.configuration_gemma import GemmaConfig
     _orig_gemma_init = GemmaConfig.__init__
+
     def _patched_gemma_init(self, *args, **kwargs):
         if "rope_scaling" in kwargs and kwargs["rope_scaling"] is not None:
             rs = kwargs["rope_scaling"]
@@ -69,13 +119,15 @@ try:
                 if "rope_type" not in rs:
                     rs["rope_type"] = "default"
         _orig_gemma_init(self, *args, **kwargs)
+
     GemmaConfig.__init__ = _patched_gemma_init
 except Exception:
     pass
 
-# Gemma tokenizer special tokens attribute
+# 6. Gemma tokenizer special tokens attribute
 try:
     from transformers import GemmaTokenizer, GemmaTokenizerFast
+
     for cls in [GemmaTokenizer, GemmaTokenizerFast]:
         if not hasattr(cls, "all_special_tokens_extended"):
             cls.all_special_tokens_extended = property(lambda self: self.all_special_tokens)
