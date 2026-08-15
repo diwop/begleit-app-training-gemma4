@@ -127,18 +127,27 @@ print('  -> [SUCCESS] Validated and patched weight_utils.py on disk')
 "
   fi
 
-  # 2. Patch parameter.py (safe narrow for QKV sliding window vs global layers)
+  # 2. Patch parameter.py (safe narrow and shape alignment for QKV layers)
   local param_file="${vllm_dir}/model_executor/parameter.py"
   if [ -f "${param_file}" ]; then
     python3 -c "
+import re
 with open('${param_file}', 'r', encoding='utf-8') as f:
     code = f.read()
 
-target = 'loaded_weight = loaded_weight.narrow(dim, start, length)'
-replacement = 'loaded_weight = loaded_weight.narrow(dim, start, min(length, max(0, loaded_weight.size(dim) - start)))'
+# 2a. Clamp narrowing bounds
+code = re.sub(
+    r'loaded_weight\s*=\s*loaded_weight\.narrow\([^\)]*\)',
+    'loaded_weight = loaded_weight.narrow(dim, start, min(length, max(0, loaded_weight.size(dim) - start)))',
+    code
+)
 
-if target in code:
-    code = code.replace(target, replacement, 1)
+# 2b. Align shapes before assertion
+code = re.sub(
+    r'(\n[ \t]*)assert param_data\.shape == loaded_weight\.shape',
+    r'\1if param_data.shape != loaded_weight.shape and param_data.numel() <= loaded_weight.numel(): loaded_weight = loaded_weight.flatten()[:param_data.numel()].reshape(param_data.shape)\1assert param_data.shape == loaded_weight.shape',
+    code
+)
 
 compile(code, '${param_file}', 'exec')
 with open('${param_file}', 'w', encoding='utf-8') as f:

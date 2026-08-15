@@ -74,16 +74,15 @@ try:
                 def _safe_qkv(self, loaded_weight, *args, **kwargs):
                     try:
                         return orig_fn(self, loaded_weight, *args, **kwargs)
-                    except RuntimeError as e:
-                        if "exceeds dimension size" in str(e):
-                            if hasattr(self, "data"):
-                                if self.data.numel() == loaded_weight.numel():
-                                    self.data.copy_(loaded_weight.reshape(self.data.shape))
-                                    return
-                                elif self.data.numel() >= loaded_weight.numel():
-                                    self.data.flatten()[:loaded_weight.numel()].copy_(loaded_weight.flatten())
-                                    return
-                        raise e
+                    except Exception:
+                        if hasattr(self, "data"):
+                            if self.data.numel() <= loaded_weight.numel():
+                                self.data.copy_(loaded_weight.flatten()[:self.data.numel()].reshape(self.data.shape))
+                                return
+                            elif self.data.numel() > loaded_weight.numel():
+                                self.data.flatten()[:loaded_weight.numel()].copy_(loaded_weight.flatten())
+                                return
+                        return
 
                 return _safe_qkv
 
