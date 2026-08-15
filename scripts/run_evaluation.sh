@@ -31,6 +31,7 @@ apptainer exec \
   --env HF_HOME="${HF_CACHE_DIR}" \
   --env HF_HUB_OFFLINE=1 \
   --env TRANSFORMERS_OFFLINE=1 \
+  --env PYTHONPATH="/repo/src-eval" \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --bind "${HF_CACHE_DIR}:${HF_CACHE_DIR}" \
   --bind "${HF_CACHE_DIR}:/root/.cache/huggingface" \
