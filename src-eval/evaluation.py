@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Runs baseline evaluation for RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic on data/dataset_eval.jsonl using SGLang.
-Evaluates the model twice:
-1. Standard generation (without thinking: chat_template_kwargs={"enable_thinking": False})
-2. Thinking-enabled generation (with thinking: chat_template_kwargs={"enable_thinking": True})
-   with calibrated sampling (temperature=1.0, top_p=0.95, top_k=64)
+Runs baseline and dynamic few-shot evaluation for RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic on data/dataset_eval.jsonl using SGLang.
+Evaluates the model across three techniques:
+1. Standard zero-shot generation (without thinking: enable_thinking=False)
+2. Thinking-enabled generation (with thinking: enable_thinking=True, T=1.0, top_p=0.95, top_k=64)
+3. Dynamic Few-Shot generation (2 semantically closest training examples retrieved via multilingual-e5-base)
 
 Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts.
 """
@@ -43,6 +43,11 @@ except ImportError:
     textstat = None
     print("[WARNING] 'textstat' is not installed. Text readability metrics will default to 0.0.", file=sys.stderr)
 
+from dynamic_few_shots import (
+    DynamicFewShotIndex,
+    build_dynamic_few_shot_user_prompt,
+)
+
 # Context length for SGLang engine
 MAX_SEQUENCE_LENGTH = 16384
 
@@ -50,6 +55,7 @@ MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
 
 MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
+TRAIN_DATA_PATH = Path("data/dataset_train.jsonl")
 RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
 
 
@@ -60,7 +66,6 @@ def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
       - Standard Gemma 4 channel tokens: <|channel>thought\n...<channel|>\n...
       - Alternative delimiters: <|thought|> ... </thought>
     """
-    # 1. Standard Gemma 4 channel tokens with special tokens preserved (<|channel>thought ... <channel|>)
     pattern_gemma4 = r"<\|channel>thought\s*(.*?)(?:<channel\|>|<\|channel\|>|$)"
     match = re.search(pattern_gemma4, text, flags=re.DOTALL)
     if match:
@@ -69,7 +74,6 @@ def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
         clean_text = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", clean_text).strip()
         return reasoning, clean_text
 
-    # 2. General thought delimiters (<|thought|> ... </thought>)
     pattern_general = r"(?:<\|thought\|>|<\|channel\|>thought)\s*(.*?)(?:</thought>|<\|channel\|>|<channel\|>|$)"
     match = re.search(pattern_general, text, flags=re.DOTALL)
     if match:
@@ -195,7 +199,7 @@ def main() -> None:
     overall_start_time = time.time()
 
     print("=" * 60)
-    print("      Gemma 4 Baseline Evaluation (SGLang)")
+    print("      Gemma 4 Baseline & Few-Shot Evaluation (SGLang)")
     print("=" * 60)
     print(f"[INFO] Model            : {MODEL_NAME}")
     print(f"[INFO] Input Dataset    : {EVAL_DATA_PATH}")
@@ -217,21 +221,38 @@ def main() -> None:
         records = integrity_records + records
         print(f"[INFO] Loaded {len(records)} total evaluation samples (including {len(integrity_records)} integrity checks).")
 
-    # Get local offline snapshot path on disk (fail fast if missing)
-    model_path = get_model_snapshot_path(MODEL_NAME)
+    # 1. Initialize Dynamic Few-Shot RAG Index
+    print("\n[INFO] Initializing Dynamic Few-Shot Index from training dataset...")
+    retriever = DynamicFewShotIndex(dataset_path=TRAIN_DATA_PATH)
 
-    # Initialize Tokenizer for chat template formatting
-    print(f"\n[INFO] Loading tokenizer from snapshot: {model_path}")
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-
-    # Format conversations into prompts
-    conversations = [
+    # 2. Build prompt conversations for all 3 modes
+    zero_shot_conversations = [
         [
             {"role": "system", "content": rec["system"]},
             {"role": "user", "content": rec["user"]},
         ]
         for rec in records
     ]
+
+    few_shot_conversations = []
+    for rec in records:
+        if rec["id"] in ("i001", "i002"):
+            few_shot_user_prompt = rec["user"]
+        else:
+            raw_user_in = load_raw_standardsprache(rec["id"]) or rec["user"]
+            top_examples = retriever.get_closest_examples(raw_user_in, k=2)
+            few_shot_user_prompt = build_dynamic_few_shot_user_prompt(raw_user_in, top_examples)
+        few_shot_conversations.append([
+            {"role": "system", "content": rec["system"]},
+            {"role": "user", "content": few_shot_user_prompt},
+        ])
+
+    # 3. Resolve local offline model snapshot path
+    model_path = get_model_snapshot_path(MODEL_NAME)
+
+    # Initialize Tokenizer for chat template formatting
+    print(f"\n[INFO] Loading tokenizer from snapshot: {model_path}")
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     prompts_no_thinking = [
         tokenizer.apply_chat_template(
@@ -240,7 +261,7 @@ def main() -> None:
             add_generation_prompt=True,
             enable_thinking=False,
         )
-        for conv in conversations
+        for conv in zero_shot_conversations
     ]
 
     prompts_thinking = [
@@ -250,7 +271,17 @@ def main() -> None:
             add_generation_prompt=True,
             enable_thinking=True,
         )
-        for conv in conversations
+        for conv in zero_shot_conversations
+    ]
+
+    prompts_few_shots = [
+        tokenizer.apply_chat_template(
+            conv,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        for conv in few_shot_conversations
     ]
 
     # Initialize SGLang Engine
@@ -284,9 +315,9 @@ def main() -> None:
         "skip_special_tokens": False,
     }
 
-    # STEP 1: Standard Inference
+    # STEP 1: Zero-Shot WITHOUT thinking
     print("=" * 60)
-    print(f"[STEP 1/2] Running inference WITHOUT thinking (enable_thinking=False) for {len(records)} samples...")
+    print(f"[STEP 1/3] Running Zero-Shot WITHOUT thinking (enable_thinking=False) for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step1_start = time.time()
 
@@ -295,9 +326,9 @@ def main() -> None:
     step1_elapsed = time.time() - step1_start
     print(f"[SUCCESS] Step 1 completed in {step1_elapsed:.1f}s ({step1_elapsed/len(records):.2f}s/sample)\n")
 
-    # STEP 2: Thinking-Enabled Inference
+    # STEP 2: Zero-Shot WITH thinking
     print("=" * 60)
-    print(f"[STEP 2/2] Running inference WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
+    print(f"[STEP 2/3] Running Zero-Shot WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step2_start = time.time()
 
@@ -306,14 +337,37 @@ def main() -> None:
     step2_elapsed = time.time() - step2_start
     print(f"[SUCCESS] Step 2 completed in {step2_elapsed:.1f}s ({step2_elapsed/len(records):.2f}s/sample)\n")
 
-    # Calculate metrics and assemble results
+    # STEP 3: Dynamic Few-Shot (2 semantically closest demonstrations)
+    print("=" * 60)
+    print(f"[STEP 3/3] Running Dynamic Few-Shot (2 retrieved examples) for {len(records)} samples...")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    step3_start = time.time()
+
+    few_shot_outputs = engine.generate(prompts_few_shots, sampling_params_no_thinking)
+
+    step3_elapsed = time.time() - step3_start
+    print(f"[SUCCESS] Step 3 completed in {step3_elapsed:.1f}s ({step3_elapsed/len(records):.2f}s/sample)\n")
+
+    # 5. Calculate metrics and assemble results
     print("=" * 60)
     print(f"[INFO] Calculating German readability metrics (FRE & WSTF)...")
     RESULTS_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     results = []
-    fre_scores = {"input": [], "ground_truth": [], "gemma4": [], "gemma4_thinking": []}
-    wstf_scores = {"input": [], "ground_truth": [], "gemma4": [], "gemma4_thinking": []}
+    fre_scores = {
+        "input": [],
+        "ground_truth": [],
+        "gemma4": [],
+        "gemma4_thinking": [],
+        "gemma4_dynamic_few_shots": [],
+    }
+    wstf_scores = {
+        "input": [],
+        "ground_truth": [],
+        "gemma4": [],
+        "gemma4_thinking": [],
+        "gemma4_dynamic_few_shots": [],
+    }
 
     for idx, rec in enumerate(records):
         raw_no_thinking = extract_output_text(no_thinking_outputs[idx])
@@ -321,6 +375,9 @@ def main() -> None:
 
         raw_thinking_output = extract_output_text(thinking_outputs[idx])
         reasoning_trace, out_thinking = extract_gemma4_reasoning(raw_thinking_output)
+
+        raw_few_shots = extract_output_text(few_shot_outputs[idx])
+        out_few_shots = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", raw_few_shots).strip()
 
         raw_user_input = load_raw_standardsprache(rec["id"]) if rec["id"] not in ("i001", "i002") else rec["user"]
         if not raw_user_input:
@@ -330,17 +387,20 @@ def main() -> None:
         assistant_metrics = get_raw_metrics(rec["assistant"]) if rec["assistant"] is not None else None
         gemma4_metrics = get_raw_metrics(out_no_thinking)
         gemma4_thinking_metrics = get_raw_metrics(out_thinking)
+        gemma4_few_shots_metrics = get_raw_metrics(out_few_shots)
 
         if assistant_metrics is not None:
             fre_scores["input"].append(user_metrics["fre"])
             fre_scores["ground_truth"].append(assistant_metrics["fre"])
             fre_scores["gemma4"].append(gemma4_metrics["fre"])
             fre_scores["gemma4_thinking"].append(gemma4_thinking_metrics["fre"])
+            fre_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["fre"])
 
             wstf_scores["input"].append(user_metrics["wstf"])
             wstf_scores["ground_truth"].append(assistant_metrics["wstf"])
             wstf_scores["gemma4"].append(gemma4_metrics["wstf"])
             wstf_scores["gemma4_thinking"].append(gemma4_thinking_metrics["wstf"])
+            wstf_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["wstf"])
 
         result_entry = {
             "id": rec["id"],
@@ -354,6 +414,8 @@ def main() -> None:
             "assistant_gemma4_thinking_reasoning": reasoning_trace,
             "assistant_gemma4_thinking": out_thinking,
             "assistant_gemma4_thinking_metrics": gemma4_thinking_metrics,
+            "assistant_gemma4_dynamic_few_shots": out_few_shots,
+            "assistant_gemma4_dynamic_few_shots_metrics": gemma4_few_shots_metrics,
         }
         results.append(result_entry)
 
@@ -373,17 +435,20 @@ def main() -> None:
         avg_gt_fre = sum(fre_scores["ground_truth"]) / num_eval_ds
         avg_g4_fre = sum(fre_scores["gemma4"]) / num_eval_ds
         avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / num_eval_ds
+        avg_g4_few_fre = sum(fre_scores["gemma4_dynamic_few_shots"]) / num_eval_ds
 
         avg_in_wstf = sum(wstf_scores["input"]) / num_eval_ds
         avg_gt_wstf = sum(wstf_scores["ground_truth"]) / num_eval_ds
         avg_g4_wstf = sum(wstf_scores["gemma4"]) / num_eval_ds
         avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / num_eval_ds
+        avg_g4_few_wstf = sum(wstf_scores["gemma4_dynamic_few_shots"]) / num_eval_ds
 
-        print(f"  * Input Standardsprache  : FRE = {avg_in_fre:.1f}  |  WSTF = {avg_in_wstf:.1f}")
-        print(f"  * Ground Truth (Target)  : FRE = {avg_gt_fre:.1f}  |  WSTF = {avg_gt_wstf:.1f}")
-        print(f"  * Gemma 4 (No Thinking)  : FRE = {avg_g4_fre:.1f}  |  WSTF = {avg_g4_wstf:.1f}")
-        print(f"  * Gemma 4 (With Thinking): FRE = {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}")
-    print(f"  * Total Evaluation Time  : {overall_elapsed:.1f}s")
+        print(f"  * Input Standardsprache         : FRE = {avg_in_fre:.1f}  |  WSTF = {avg_in_wstf:.1f}")
+        print(f"  * Ground Truth (Target)         : FRE = {avg_gt_fre:.1f}  |  WSTF = {avg_gt_wstf:.1f}")
+        print(f"  * Gemma 4 (Zero-Shot)           : FRE = {avg_g4_fre:.1f}  |  WSTF = {avg_g4_wstf:.1f}")
+        print(f"  * Gemma 4 (With Thinking)       : FRE = {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}")
+        print(f"  * Gemma 4 (Dynamic Few-Shots k=2): FRE = {avg_g4_few_fre:.1f}  |  WSTF = {avg_g4_few_wstf:.1f}")
+    print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
 
 

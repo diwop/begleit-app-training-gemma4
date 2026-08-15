@@ -313,17 +313,40 @@ Produces `data/results.jsonl` with German textstat readability metrics (`fre` = 
 
 ### Pre-download Model on Login Node (`hsuper-login01`)
 
-Because GPU compute nodes do not have internet access, download the model weights to the shared Hugging Face cache on the login node first:
+### Pre-download Models on Login Node (`hsuper-login01`)
+
+Because GPU compute nodes do not have internet access, download both the LLM and embedding model weights (`RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` and `intfloat/multilingual-e5-base`) to the shared Hugging Face cache on the login node first:
 
 ```bash
 # Optional: Set HF token if accessing gated models
 export HF_TOKEN="hf_..."
 
-# Download model to ~/.cache/huggingface on the shared filesystem
-bash scripts/download_model.sh
+# Download models and install textstat & sentence-transformers to shared filesystem
+bash scripts/download_models.sh
 ```
 
-### Run Evaluation on GPU Compute Node
+---
+
+## 4. Dynamic Few-Shot RAG Retrieval (`src-eval/dynamic_few_shots.py`)
+
+Provides semantic search over training dataset input/output pairs using **`sentence-transformers`** and **`intfloat/multilingual-e5-base`**:
+
+- Indexes all `user_input` texts from `data/raw/{id}_Standardsprache.txt` mapped to target `assistant` Leichte Sprache.
+- Pre-encodes corpus with E5 passage prefix (`passage: <text>`).
+- Encodes queries with E5 query prefix (`query: <text>`) and computes cosine similarity.
+- Returns top-$k$ semantically closest training demonstrations.
+
+### Usage in Python:
+```python
+from dynamic_few_shots import get_dynamic_few_shots, format_few_shot_prompt
+
+examples = get_dynamic_few_shots("Wie beantrage ich Wohngeld?", k=3)
+formatted_prompt = format_few_shot_prompt(examples)
+```
+
+---
+
+## 5. Execution on GPU Compute Node
 
 #### Option 1: Interactive Node (`salloc`)
 ```bash
