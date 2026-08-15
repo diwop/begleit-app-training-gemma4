@@ -71,6 +71,9 @@ except ImportError:
     textstat = None
     print("[WARNING] 'textstat' is not installed. Text readability metrics will default to 0.0.", file=sys.stderr)
 
+# Single source of truth for max sequence/token length
+MAX_SEQUENCE_LENGTH = 8192
+
 MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
@@ -176,7 +179,7 @@ def main() -> None:
         tensor_parallel_size=tensor_parallel_size,
         trust_remote_code=True,
         gpu_memory_utilization=0.90,
-        max_model_len=8192,
+        max_model_len=MAX_SEQUENCE_LENGTH,
         disable_log_stats=False,
     )
 
