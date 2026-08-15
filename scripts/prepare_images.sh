@@ -97,16 +97,28 @@ patch_vllm_container() {
   local weight_utils="${vllm_dir}/model_executor/model_loader/weight_utils.py"
   if [ -f "${weight_utils}" ]; then
     python3 -c "
-with open('${weight_utils}', 'r') as f: code = f.read()
+import re
+with open('${weight_utils}', 'r', encoding='utf-8') as f:
+    code = f.read()
+
+# Clean any previously malformed multi-line patch if present
+code = re.sub(
+    r'if param\.size\(\) != loaded_weight\.size\(\)[^\n]*\n\s*loaded_weight[^\n]*\n\s*assert param\.size\(\) == loaded_weight\.size\(\), \(',
+    'assert param.size() == loaded_weight.size(), (',
+    code
+)
+
 target = 'assert param.size() == loaded_weight.size(), ('
-replacement = '''if param.size() != loaded_weight.size() and param.numel() <= loaded_weight.numel():
-        loaded_weight = loaded_weight.flatten()[:param.numel()].reshape(param.shape)
-    assert param.size() == loaded_weight.size(), ('''
-if target in code and 'loaded_weight.flatten()' not in code:
-    with open('${weight_utils}', 'w') as f: f.write(code.replace(target, replacement, 1))
-    print('  -> [SUCCESS] Patched weight_utils.py on disk')
-else:
-    print('  -> [OK] weight_utils.py already patched or target pattern not found')
+replacement = 'if param.size() != loaded_weight.size() and param.numel() <= loaded_weight.numel(): loaded_weight = loaded_weight.flatten()[:param.numel()].reshape(param.shape)\n    assert param.size() == loaded_weight.size(), ('
+
+if 'loaded_weight.flatten()' not in code and target in code:
+    code = code.replace(target, replacement, 1)
+
+# Verify syntax before saving
+compile(code, '${weight_utils}', 'exec')
+with open('${weight_utils}', 'w', encoding='utf-8') as f:
+    f.write(code)
+print('  -> [SUCCESS] Validated and patched weight_utils.py on disk')
 "
   fi
 
@@ -114,16 +126,19 @@ else:
   local param_file="${vllm_dir}/model_executor/parameter.py"
   if [ -f "${param_file}" ]; then
     python3 -c "
-with open('${param_file}', 'r') as f: code = f.read()
-target = 'loaded_weight = loaded_weight.narrow('
-replacement = '''if 'dim' in locals() and dim < loaded_weight.dim():
-            length = min(length, max(0, loaded_weight.size(dim) - start))
-        loaded_weight = loaded_weight.narrow('''
-if target in code and 'max(0, loaded_weight.size(dim)' not in code:
-    with open('${param_file}', 'w') as f: f.write(code.replace(target, replacement, 1))
-    print('  -> [SUCCESS] Patched parameter.py on disk')
-else:
-    print('  -> [OK] parameter.py already patched or target pattern not found')
+with open('${param_file}', 'r', encoding='utf-8') as f:
+    code = f.read()
+
+target = 'loaded_weight = loaded_weight.narrow(dim, start, length)'
+replacement = 'loaded_weight = loaded_weight.narrow(dim, start, min(length, max(0, loaded_weight.size(dim) - start)))'
+
+if target in code:
+    code = code.replace(target, replacement, 1)
+
+compile(code, '${param_file}', 'exec')
+with open('${param_file}', 'w', encoding='utf-8') as f:
+    f.write(code)
+print('  -> [SUCCESS] Validated and patched parameter.py on disk')
 "
   fi
 
@@ -131,12 +146,18 @@ else:
   local mla_file="${vllm_dir}/model_executor/layers/attention/mla_attention.py"
   if [ -f "${mla_file}" ]; then
     python3 -c "
-with open('${mla_file}', 'r') as f: code = f.read()
+with open('${mla_file}', 'r', encoding='utf-8') as f:
+    code = f.read()
+
 broken = 'kv_c_normed = kv_c_normed.to(self.kv_b_proj.weight.dtype)'
 fixed = 'kv_c_normed = kv_c_normed.to(_kv_b_proj_w_dtype)'
+
 if broken in code:
-    with open('${mla_file}', 'w') as f: f.write(code.replace(broken, fixed, 1))
-    print('  -> [SUCCESS] Patched mla_attention.py on disk')
+    code = code.replace(broken, fixed, 1)
+    compile(code, '${mla_file}', 'exec')
+    with open('${mla_file}', 'w', encoding='utf-8') as f:
+        f.write(code)
+    print('  -> [SUCCESS] Validated and patched mla_attention.py on disk')
 "
   fi
 }
