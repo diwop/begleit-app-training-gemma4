@@ -337,3 +337,57 @@ bash scripts/run_evaluation.sh
 ```bash
 sbatch scripts/submit_evaluation.sbatch
 ```
+
+---
+
+## 4. Gemma 4 MoE Adapter Fine-Tuning (`src-train/config.yml`)
+
+Fine-tunes a LoRA adapter on `google/gemma-4-26b-a4b-it` using **Axolotl** with **DeepSpeed ZeRO-3** CPU offloading across 2+ NVIDIA L40S GPUs.
+
+### Key Architecture & Configuration Decisions
+
+1. **MoE LoRA Module Regex Targeting (vLLM Compatibility)**:
+   Gemma 4 26B-A4B integrates vision components where bare suffixes like `gate_proj` match vision layers wrapped by `Gemma4ClippableLinear`. Targeting only the language model layers:
+   ```yaml
+   lora_target_modules: 'model\.language_model\.layers\.[\d]+\.(_checkpoint_wrapped_module\.)?(mlp|self_attn)\.(up|down|gate|q|k|v|o)_proj'
+   ```
+   ensures PEFT cleanly merges/saves the weights and vLLM can load the MoE adapter seamlessly during inference.
+
+2. **Gemma 4 Turn Boundaries**:
+   Turn endings are marked by `<turn|>` (`id: 106`), not `<end_of_turn>` (Gemma 3). Configured explicitly via:
+   ```yaml
+   special_tokens:
+     eos_token: "<eos>"
+   eot_tokens:
+     - "<turn|>"
+   ```
+
+3. **Multi-GPU & DeepSpeed ZeRO-3**:
+   - Requires at least 2 GPUs (`scripts/run_training.sh` automatically verifies GPU count and fails fast if `< 2`).
+   - DeepSpeed ZeRO-3 offloads optimizer states and parameters to CPU RAM (`src-train/deepspeed_zero3.json`), enabling unquantized bfloat16 training of 26B MoE parameters.
+
+4. **Fast Initial Smoke Verification vs. Full Run**:
+   - Initial verification uses `data/dataset_train_sample.jsonl` (first 10 samples) and `num_epochs: 1` (`#SBATCH --time=00:30:00`).
+   - For full training, switch `datasets.path` in `src-train/config.yml` to `data/dataset_train.jsonl` and set `num_epochs: 3`.
+
+### Pre-download Training & Evaluation Models
+
+On the **login node** (`hsuper-login01`):
+```bash
+bash scripts/download_model.sh
+```
+
+### Run Fine-Tuning on GPU Compute Node
+
+#### Option 1: Interactive Node (`salloc`)
+```bash
+salloc --partition=small_gpu8 --gpus 2 --time=00:30:00
+ssh <assigned-gpu-node>
+cd $HOME/begleit-app-training-gemma4
+bash scripts/run_training.sh
+```
+
+#### Option 2: Queue with Slurm (`sbatch`)
+```bash
+sbatch scripts/submit_training.sbatch
+```

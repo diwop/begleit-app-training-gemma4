@@ -75,6 +75,72 @@ build_sandbox() {
   echo "[SUCCESS] ${name} sandbox container ready at: ${target_dir}"
 }
 
+patch_vllm_container() {
+  local sandbox_dir="${OUTPUT_DIR}/vllm_sandbox"
+  if [ ! -d "${sandbox_dir}" ]; then
+    echo "[WARNING] Sandbox directory '${sandbox_dir}' not found. Run with 'eval' or 'all' to build it first."
+    return
+  fi
+  echo "[INFO] Applying Gemma 4 compatibility hotfixes directly to vLLM sandbox on login node..."
+
+  local vllm_dir
+  vllm_dir=$(find "${sandbox_dir}/usr" -type d -path "*/dist-packages/vllm" 2>/dev/null | head -n 1)
+
+  if [ -z "${vllm_dir}" ]; then
+    echo "[WARNING] Could not locate vLLM package inside ${sandbox_dir}"
+    return
+  fi
+
+  echo "[INFO] Found vLLM installation at: ${vllm_dir}"
+
+  # 1. Patch weight_utils.py (1D slice for [512] vs [256])
+  local weight_utils="${vllm_dir}/model_executor/model_loader/weight_utils.py"
+  if [ -f "${weight_utils}" ]; then
+    python3 -c "
+with open('${weight_utils}', 'r') as f: code = f.read()
+target = 'assert param.size() == loaded_weight.size(), ('
+replacement = '''if param.size() != loaded_weight.size() and param.numel() <= loaded_weight.numel():
+        loaded_weight = loaded_weight.flatten()[:param.numel()].reshape(param.shape)
+    assert param.size() == loaded_weight.size(), ('''
+if target in code and 'loaded_weight.flatten()' not in code:
+    with open('${weight_utils}', 'w') as f: f.write(code.replace(target, replacement, 1))
+    print('  -> [SUCCESS] Patched weight_utils.py on disk')
+else:
+    print('  -> [OK] weight_utils.py already patched or target pattern not found')
+"
+  fi
+
+  # 2. Patch parameter.py (safe narrow for QKV sliding window vs global layers)
+  local param_file="${vllm_dir}/model_executor/parameter.py"
+  if [ -f "${param_file}" ]; then
+    python3 -c "
+with open('${param_file}', 'r') as f: code = f.read()
+target = 'loaded_weight = loaded_weight.narrow('
+replacement = '''if 'dim' in locals() and dim < loaded_weight.dim():
+            length = min(length, max(0, loaded_weight.size(dim) - start))
+        loaded_weight = loaded_weight.narrow('''
+if target in code and 'max(0, loaded_weight.size(dim)' not in code:
+    with open('${param_file}', 'w') as f: f.write(code.replace(target, replacement, 1))
+    print('  -> [SUCCESS] Patched parameter.py on disk')
+else:
+    print('  -> [OK] parameter.py already patched or target pattern not found')
+"
+  fi
+
+  # 3. Patch mla_attention.py (Issue #43263)
+  local mla_file="${vllm_dir}/model_executor/layers/attention/mla_attention.py"
+  if [ -f "${mla_file}" ]; then
+    python3 -c "
+with open('${mla_file}', 'r') as f: code = f.read()
+broken = 'kv_c_normed = kv_c_normed.to(self.kv_b_proj.weight.dtype)'
+fixed = 'kv_c_normed = kv_c_normed.to(_kv_b_proj_w_dtype)'
+if broken in code:
+    with open('${mla_file}', 'w') as f: f.write(code.replace(broken, fixed, 1))
+    print('  -> [SUCCESS] Patched mla_attention.py on disk')
+"
+  fi
+}
+
 case "${TARGET}" in
   train)
     build_sandbox "axolotl" "${TRAIN_IMAGE}"
@@ -84,6 +150,7 @@ case "${TARGET}" in
     echo "[INFO] Installing 'textstat' in vLLM environment on login node..."
     mkdir -p "${HOME}/.local"
     apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/vllm_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir textstat
+    patch_vllm_container
     ;;
   all)
     build_sandbox "axolotl" "${TRAIN_IMAGE}"
@@ -91,9 +158,13 @@ case "${TARGET}" in
     echo "[INFO] Installing 'textstat' in vLLM environment on login node..."
     mkdir -p "${HOME}/.local"
     apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/vllm_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir textstat
+    patch_vllm_container
+    ;;
+  patch)
+    patch_vllm_container
     ;;
   *)
-    echo "[ERROR] Unknown target: '${TARGET}'. Usage: $0 [all|train|eval]"
+    echo "[ERROR] Unknown target: '${TARGET}'. Usage: $0 [all|train|eval|patch]"
     exit 1
     ;;
 esac

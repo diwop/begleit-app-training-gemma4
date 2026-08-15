@@ -21,9 +21,11 @@ RAW_DIR = Path("data/raw")
 SYSTEM_PROMPT_PATH = Path("prompts/system-prompt.md")
 PROMPT_TEMPLATE_PATH = Path("prompts/prompt-template.md")
 TRAIN_OUTPUT = Path("data/dataset_train.jsonl")
+TRAIN_SAMPLE_OUTPUT = Path("data/dataset_train_sample.jsonl")
 EVAL_OUTPUT = Path("data/dataset_eval.jsonl")
 EVAL_RATIO = 0.10
 SEED = 42
+SAMPLE_SIZE = 10
 
 
 def get_tokenizer():
@@ -149,6 +151,11 @@ def main() -> None:
             "system": system_prompt,
             "user": user_prompt,
             "assistant": ls_text,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": ls_text},
+            ],
         })
 
     print(f"[INFO] Kept {len(records)} pairs (filtered {len(filtered_outliers)} outliers exceeding {MAX_SEQUENCE_LENGTH} tokens):")
@@ -163,8 +170,10 @@ def main() -> None:
     eval_count = int(round(len(shuffled) * EVAL_RATIO))
     eval_records = sorted(shuffled[:eval_count], key=lambda r: r["id"])
     train_records = sorted(shuffled[eval_count:], key=lambda r: r["id"])
+    train_sample_records = train_records[:SAMPLE_SIZE]
 
     write_jsonl(TRAIN_OUTPUT, train_records)
+    write_jsonl(TRAIN_SAMPLE_OUTPUT, train_sample_records)
     write_jsonl(EVAL_OUTPUT, eval_records)
 
     dist_user = compute_distribution(user_tokens)
@@ -172,6 +181,7 @@ def main() -> None:
     dist_total = compute_distribution(total_tokens)
 
     print(f"\n[SUCCESS] Wrote {len(train_records)} train samples to {TRAIN_OUTPUT}")
+    print(f"[SUCCESS] Wrote {len(train_sample_records)} train sample subset to {TRAIN_SAMPLE_OUTPUT}")
     print(f"[SUCCESS] Wrote {len(eval_records)} eval samples to {EVAL_OUTPUT}")
 
     # Print clean summary table to console

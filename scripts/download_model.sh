@@ -7,15 +7,22 @@ WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VLLM_CONTAINER_DIR="${WORKSPACE_ROOT}/images/vllm_sandbox"
 CONTAINER_PYTHON="/usr/bin/python3"
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
-MODEL_NAME="RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
+
+# Models required for training (bfloat16 unquantized) and evaluation (FP8 dynamic)
+MODELS=(
+  "google/gemma-4-26b-a4b-it"
+  "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
+)
 
 echo "============================================================"
-echo " Preparing Evaluation Dependencies & Model Snapshot"
+echo " Preparing Training & Evaluation Dependencies and Models"
 echo " (Run this on hsuper-login01 where internet is available)"
 echo "============================================================"
-echo "[INFO] Model Name      : ${MODEL_NAME}"
 echo "[INFO] Cache Directory : ${HF_CACHE_DIR}"
 echo "[INFO] Container Python: ${CONTAINER_PYTHON}"
+for m in "${MODELS[@]}"; do
+  echo "[INFO] Target Model    : ${m}"
+done
 echo "============================================================"
 
 mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local"
@@ -27,8 +34,8 @@ apptainer exec \
   "${VLLM_CONTAINER_DIR}" \
   "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir textstat
 
-# 2. Download model snapshot into shared Hugging Face cache
-echo "[INFO] Downloading Hugging Face model snapshot..."
+# 2. Download model snapshots into shared Hugging Face cache
+echo "[INFO] Downloading Hugging Face model snapshots..."
 apptainer exec \
   --env HF_HOME="${HF_CACHE_DIR}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
@@ -39,14 +46,21 @@ apptainer exec \
 import os
 from huggingface_hub import snapshot_download
 
-model_name = '${MODEL_NAME}'
+models = [
+    'google/gemma-4-26b-a4b-it',
+    'RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic',
+]
 token = os.environ.get('HF_TOKEN', None)
 
-print(f'[INFO] Downloading snapshot for {model_name}...')
-path = snapshot_download(repo_id=model_name, token=token)
-print(f'[SUCCESS] Model snapshot downloaded to: {path}')
+for model_name in models:
+    print(f'[INFO] Checking/downloading snapshot for {model_name}...')
+    path = snapshot_download(repo_id=model_name, token=token)
+    print(f'[SUCCESS] Snapshot ready at: {path}')
 "
 
+# 3. Ensure vLLM sandbox has on-disk compatibility patches applied
+bash "${WORKSPACE_ROOT}/scripts/prepare_images.sh" patch
+
 echo "============================================================"
-echo "[SUCCESS] Model download and evaluation dependencies ready!"
+echo "[SUCCESS] All model snapshots, dependencies, and container patches ready!"
 echo "============================================================"
