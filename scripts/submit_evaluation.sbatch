@@ -21,5 +21,5 @@ echo "Partition    : ${SLURM_JOB_PARTITION:-N/A}"
 echo "Submit Dir   : ${SLURM_SUBMIT_DIR:-$PWD}"
 echo "========================="
 
-# Execute vLLM evaluation helper script
+# Execute SGLang evaluation helper script
 bash scripts/run_evaluation.sh
