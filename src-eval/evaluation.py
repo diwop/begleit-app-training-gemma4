@@ -140,6 +140,36 @@ def load_eval_data(path: Path) -> list[dict[str, str]]:
     return records
 
 
+def get_integrity_checks(default_system_prompt: str) -> list[dict[str, str | None]]:
+    """Build the two initial integrity check prompts."""
+    # i001: General assistant, direct question, no prompt template
+    i001 = {
+        "id": "i001",
+        "system": "Du bist ein hilfreicher Assistent.",
+        "user": "Warum ist der Himmel blau?",
+        "assistant": None,
+    }
+
+    # i002: Standard system prompt, prompt template wrapped
+    prompt_template_path = Path("prompts/prompt-template.md")
+    if prompt_template_path.exists():
+        template = prompt_template_path.read_text(encoding="utf-8").strip()
+        i002_user = template.replace("%INPUT%", "Warum ist der Himmel blau und nicht schwarz?")
+    else:
+        i002_user = (
+            "### Text in Standardsprache:\n```input\nWarum ist der Himmel blau und nicht schwarz?\n```\n\n"
+            "### Aufgabe:\nÜbersetze den Text in Leichte Sprache. Beachte alle Regeln für Leichte Sprache."
+        )
+
+    i002 = {
+        "id": "i002",
+        "system": default_system_prompt,
+        "user": i002_user,
+        "assistant": None,
+    }
+    return [i001, i002]
+
+
 def main() -> None:
     overall_start_time = time.time()
 
@@ -155,11 +185,16 @@ def main() -> None:
     print(f"[INFO] Detected GPUs    : {gpu_count} (Using Tensor Parallel Size: {tensor_parallel_size})")
 
     records = load_eval_data(EVAL_DATA_PATH)
-    if MAX_EVAL_SAMPLES > 0 and len(records) > MAX_EVAL_SAMPLES:
-        print(f"[INFO] Evaluating fast sample subset: first {MAX_EVAL_SAMPLES} samples (out of {len(records)} total).")
-        records = records[:MAX_EVAL_SAMPLES]
+    default_system_prompt = records[0]["system"] if records else "Du bist ein hilfreicher Assistent für Leichte Sprache."
+    integrity_records = get_integrity_checks(default_system_prompt)
+
+    if MAX_EVAL_SAMPLES > 0:
+        dataset_subset_count = max(0, MAX_EVAL_SAMPLES - len(integrity_records))
+        records = integrity_records + records[:dataset_subset_count]
+        print(f"[INFO] Evaluating {len(records)} total samples ({len(integrity_records)} integrity checks + {dataset_subset_count} dataset samples).")
     else:
-        print(f"[INFO] Loaded {len(records)} evaluation samples.")
+        records = integrity_records + records
+        print(f"[INFO] Loaded {len(records)} total evaluation samples (including {len(integrity_records)} integrity checks).")
 
     # Get local offline snapshot path on disk (fail fast if missing)
     model_path = get_model_snapshot_path(MODEL_NAME)
@@ -255,22 +290,25 @@ def main() -> None:
         raw_thinking_output = thinking_outputs[idx].outputs[0].text.strip()
         reasoning_trace, out_thinking = extract_gemma4_reasoning(raw_thinking_output)
 
-        raw_user_input = load_raw_standardsprache(rec["id"]) or rec["user"]
+        raw_user_input = load_raw_standardsprache(rec["id"]) if rec["id"] not in ("i001", "i002") else rec["user"]
+        if not raw_user_input:
+            raw_user_input = rec["user"]
 
         user_metrics = get_raw_metrics(raw_user_input)
-        assistant_metrics = get_raw_metrics(rec["assistant"])
+        assistant_metrics = get_raw_metrics(rec["assistant"]) if rec["assistant"] is not None else None
         gemma4_metrics = get_raw_metrics(out_no_thinking)
         gemma4_thinking_metrics = get_raw_metrics(out_thinking)
 
-        fre_scores["input"].append(user_metrics["fre"])
-        fre_scores["ground_truth"].append(assistant_metrics["fre"])
-        fre_scores["gemma4"].append(gemma4_metrics["fre"])
-        fre_scores["gemma4_thinking"].append(gemma4_thinking_metrics["fre"])
+        if assistant_metrics is not None:
+            fre_scores["input"].append(user_metrics["fre"])
+            fre_scores["ground_truth"].append(assistant_metrics["fre"])
+            fre_scores["gemma4"].append(gemma4_metrics["fre"])
+            fre_scores["gemma4_thinking"].append(gemma4_thinking_metrics["fre"])
 
-        wstf_scores["input"].append(user_metrics["wstf"])
-        wstf_scores["ground_truth"].append(assistant_metrics["wstf"])
-        wstf_scores["gemma4"].append(gemma4_metrics["wstf"])
-        wstf_scores["gemma4_thinking"].append(gemma4_thinking_metrics["wstf"])
+            wstf_scores["input"].append(user_metrics["wstf"])
+            wstf_scores["ground_truth"].append(assistant_metrics["wstf"])
+            wstf_scores["gemma4"].append(gemma4_metrics["wstf"])
+            wstf_scores["gemma4_thinking"].append(gemma4_thinking_metrics["wstf"])
 
         result_entry = {
             "id": rec["id"],
@@ -297,16 +335,17 @@ def main() -> None:
     print("=" * 60)
     print("      Evaluation Summary Metrics (Dataset Averages)")
     print("=" * 60)
-    if fre_scores["input"] and sum(fre_scores["input"]) > 0:
-        avg_in_fre = sum(fre_scores["input"]) / len(results)
-        avg_gt_fre = sum(fre_scores["ground_truth"]) / len(results)
-        avg_g4_fre = sum(fre_scores["gemma4"]) / len(results)
-        avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / len(results)
+    num_eval_ds = len(fre_scores["ground_truth"])
+    if num_eval_ds > 0:
+        avg_in_fre = sum(fre_scores["input"]) / num_eval_ds
+        avg_gt_fre = sum(fre_scores["ground_truth"]) / num_eval_ds
+        avg_g4_fre = sum(fre_scores["gemma4"]) / num_eval_ds
+        avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / num_eval_ds
 
-        avg_in_wstf = sum(wstf_scores["input"]) / len(results)
-        avg_gt_wstf = sum(wstf_scores["ground_truth"]) / len(results)
-        avg_g4_wstf = sum(wstf_scores["gemma4"]) / len(results)
-        avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / len(results)
+        avg_in_wstf = sum(wstf_scores["input"]) / num_eval_ds
+        avg_gt_wstf = sum(wstf_scores["ground_truth"]) / num_eval_ds
+        avg_g4_wstf = sum(wstf_scores["gemma4"]) / num_eval_ds
+        avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / num_eval_ds
 
         print(f"  * Input Standardsprache  : FRE = {avg_in_fre:.1f}  |  WSTF = {avg_in_wstf:.1f}")
         print(f"  * Ground Truth (Target)  : FRE = {avg_gt_fre:.1f}  |  WSTF = {avg_gt_wstf:.1f}")
