@@ -55,17 +55,19 @@ RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
 def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
     """
     Extracts reasoning trace and final clean text from Gemma 4 thinking output.
-    Returns: (reasoning_trace, clean_output)
+    Handles <|channel>thought ... <channel|>, <|thought|> ... </thought>, etc.
     """
-    pattern = r"<\|channel>thought\s*(.*?)(?:<channel\|>|$)"
+    pattern = r"(?:<\|channel>thought|<\|thought\|>|<\|channel\|>thought|<\|channel>)\s*(.*?)(?:<channel\|>|<\|channel\|>|</thought>|$)"
     match = re.search(pattern, text, flags=re.DOTALL)
 
-    if match:
+    if match and match.group(1).strip():
         reasoning = match.group(1).strip()
         clean_text = re.sub(pattern, "", text, flags=re.DOTALL).strip()
+        clean_text = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", clean_text).strip()
         return reasoning, clean_text
 
-    return "", text.strip()
+    clean_text = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", text).strip()
+    return "", clean_text
 
 
 def get_raw_metrics(text: str) -> dict[str, float]:
