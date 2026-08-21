@@ -168,12 +168,22 @@ fixed = 'kv_c_normed = kv_c_normed.to(_kv_b_proj_w_dtype)'
 
 if broken in code:
     code = code.replace(broken, fixed, 1)
-    compile(code, '${mla_file}', 'exec')
     with open('${mla_file}', 'w', encoding='utf-8') as f:
         f.write(code)
-    print('  -> [SUCCESS] Validated and patched mla_attention.py on disk')
+    print('  -> [SUCCESS] Patched mla_attention.py on disk')
 "
   fi
+
+  # 4. Automated Post-Patch Container Validation Test
+  echo "[INFO] Running verification test inside Apptainer container..."
+  apptainer exec "${sandbox_dir}" /usr/bin/python3 -c "
+import vllm
+print('  * [VERIFIED] vLLM version:', vllm.__version__)
+from vllm.model_executor.parameter import BasevLLMParameter, BlockQuantScaleParameter, ModelWeightParameter, RowvLLMParameter
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
+from vllm.model_executor.layers.linear import ColumnParallelLinear, RowParallelLinear
+print('  * [SUCCESS] All critical vLLM layers and parameters imported cleanly without error!')
+"
 }
 
 case "${TARGET}" in
