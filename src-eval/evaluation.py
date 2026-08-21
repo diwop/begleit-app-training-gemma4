@@ -45,6 +45,8 @@ except ImportError:
 # Single source of truth for max sequence/token length
 MAX_SEQUENCE_LENGTH = 8192
 
+MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
+
 MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
@@ -151,7 +153,11 @@ def main() -> None:
     print(f"[INFO] Detected GPUs    : {gpu_count} (Using Tensor Parallel Size: {tensor_parallel_size})")
 
     records = load_eval_data(EVAL_DATA_PATH)
-    print(f"[INFO] Loaded {len(records)} evaluation samples.")
+    if MAX_EVAL_SAMPLES > 0 and len(records) > MAX_EVAL_SAMPLES:
+        print(f"[INFO] Evaluating fast sample subset: first {MAX_EVAL_SAMPLES} samples (out of {len(records)} total).")
+        records = records[:MAX_EVAL_SAMPLES]
+    else:
+        print(f"[INFO] Loaded {len(records)} evaluation samples.")
 
     # Get local offline snapshot path on disk (fail fast if missing)
     model_path = get_model_snapshot_path(MODEL_NAME)
