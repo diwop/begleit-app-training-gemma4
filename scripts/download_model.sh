@@ -32,7 +32,7 @@ echo "[INFO] Installing/verifying 'textstat' in SGLang environment..."
 apptainer exec \
   --bind "${HOME}/.local:${HOME}/.local" \
   "${SGLANG_CONTAINER_DIR}" \
-  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir textstat
+  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat
 
 # 2. Download model snapshots into shared Hugging Face cache
 echo "[INFO] Downloading Hugging Face model snapshots..."

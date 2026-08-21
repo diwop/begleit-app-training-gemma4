@@ -101,7 +101,7 @@ case "${TARGET}" in
     build_sandbox "sglang" "${EVAL_IMAGE}"
     echo "[INFO] Installing 'textstat' in SGLang environment on login node..."
     mkdir -p "${HOME}/.local"
-    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir textstat
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat
     verify_sglang_container
     ;;
   all)
@@ -109,7 +109,7 @@ case "${TARGET}" in
     build_sandbox "sglang" "${EVAL_IMAGE}"
     echo "[INFO] Installing 'textstat' in SGLang environment on login node..."
     mkdir -p "${HOME}/.local"
-    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir textstat
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat
     verify_sglang_container
     ;;
   verify)
