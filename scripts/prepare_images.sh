@@ -127,28 +127,28 @@ print('  -> [SUCCESS] Validated and patched weight_utils.py on disk')
 "
   fi
 
-  # 2. Patch parameter.py (safe narrow and shape alignment for QKV layers)
+  # 2. Patch parameter.py (safe narrow and shape alignment for QKV & row parallel layers)
   local param_file="${vllm_dir}/model_executor/parameter.py"
   if [ -f "${param_file}" ]; then
     python3 -c "
-import re
 with open('${param_file}', 'r', encoding='utf-8') as f:
     code = f.read()
 
-# 2a. Clamp narrowing bounds
-code = re.sub(
-    r'loaded_weight\s*=\s*loaded_weight\.narrow\([^\)]*\)',
-    'loaded_weight = loaded_weight.narrow(dim, start, min(length, max(0, loaded_weight.size(dim) - start)))',
-    code
-)
+lines = code.split('\n')
+for i, line in enumerate(lines):
+    if 'loaded_weight = loaded_weight.narrow(' in line:
+        indent = ' ' * (len(line) - len(line.lstrip()))
+        prev_context = '\n'.join(lines[max(0, i-15):i])
+        if 'load_row_parallel_weight' in prev_context:
+            lines[i] = f'{indent}loaded_weight = loaded_weight.narrow(self.dim, start, min(length, max(0, loaded_weight.size(self.dim) - start)))'
+        else:
+            lines[i] = f'{indent}loaded_weight = loaded_weight.narrow(dim, start, min(length, max(0, loaded_weight.size(dim) - start)))'
+    elif 'assert param_data.shape == loaded_weight.shape' in line:
+        if i > 0 and 'flatten()' not in lines[i-1]:
+            indent = ' ' * (len(line) - len(line.lstrip()))
+            lines[i] = f'{indent}if param_data.shape != loaded_weight.shape and param_data.numel() <= loaded_weight.numel(): loaded_weight = loaded_weight.flatten()[:param_data.numel()].reshape(param_data.shape)\n{line}'
 
-# 2b. Align shapes before assertion
-code = re.sub(
-    r'(\n[ \t]*)assert param_data\.shape == loaded_weight\.shape',
-    r'\1if param_data.shape != loaded_weight.shape and param_data.numel() <= loaded_weight.numel(): loaded_weight = loaded_weight.flatten()[:param_data.numel()].reshape(param_data.shape)\1assert param_data.shape == loaded_weight.shape',
-    code
-)
-
+code = '\n'.join(lines)
 compile(code, '${param_file}', 'exec')
 with open('${param_file}', 'w', encoding='utf-8') as f:
     f.write(code)
