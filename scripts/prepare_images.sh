@@ -397,6 +397,79 @@ def _adjust_shard_indexes_for_packing(
     return shard_size, shard_offset
 
 
+class SharedWeightParameter(BasevLLMParameter):
+    def __init__(self, partitions: dict[str | int, BasevLLMParameter], **kwargs):
+        self.partitions = partitions
+        self.kwargs = kwargs
+        super().__init__(data=None, weight_loader=self._fake_weight_loader)
+
+    def _shard_id_as_int(self, shard_id: str | int | None) -> int:
+        if shard_id is None:
+            return 0
+        if isinstance(shard_id, int):
+            return shard_id
+        return int(shard_id)
+
+    def load_column_parallel_weight(self, loaded_weight: torch.Tensor, **kwargs):
+        partition_id = self._shard_id_as_int(kwargs.pop(\"shard_id\", None))
+        partition = self.partitions[partition_id]
+        partition.load_column_parallel_weight(loaded_weight, **kwargs)
+
+    def load_row_parallel_weight(self, loaded_weight: torch.Tensor, **kwargs):
+        partition_id = self._shard_id_as_int(kwargs.pop(\"shard_id\", None))
+        partition = self.partitions[partition_id]
+        partition.load_row_parallel_weight(loaded_weight, **kwargs)
+
+    def load_merged_column_weight(self, loaded_weight: torch.Tensor, **kwargs):
+        partition_id = self._shard_id_as_int(kwargs.pop(\"shard_id\", None))
+        partition = self.partitions[partition_id]
+        partition.load_merged_column_weight(loaded_weight, **kwargs)
+
+    def load_qkv_weight(self, loaded_weight: torch.Tensor, **kwargs):
+        partition_id = self._shard_id_as_int(kwargs.pop(\"shard_id\", None))
+        partition = self.partitions[partition_id]
+
+        input_dim = self.kwargs.get(\"input_dim\")
+        shard_size = partition.data.size(input_dim) // self.tp_size if input_dim is not None else partition.data.size(0) // self.tp_size
+        shard_offset = self.tp_rank * shard_size
+        shard_id = \"q\"
+        num_heads = kwargs.get(\"num_heads\")
+
+        ModelWeightParameter.load_qkv_weight(
+            partition,
+            loaded_weight,
+            shard_offset=shard_offset,
+            shard_size=shard_size,
+            shard_id=shard_id,
+            num_heads=num_heads,
+        )
+
+    def process_weights_after_loading(self):
+        for key in self.partitions:
+            self.partitions[key] = torch.nn.Parameter(
+                data=self.partitions[key].data, requires_grad=False
+            )
+
+    @property
+    def data(self):
+        raise ValueError(
+            \"Accessing data of a SharedWeightParameter is not allowed.\"
+        )
+
+    def get_partition(self, partition_id: str | int) -> torch.Tensor:
+        return self.partitions[partition_id].data
+
+    def _fake_weight_loader(
+        self,
+        param: BasevLLMParameter,
+        loaded_weight: torch.Tensor,
+        loaded_weight_shard_id: str | int | None,
+    ):
+        raise ValueError(
+            \"When loading partition weights of SharedWeightParameter, use methods provided by SharedWeightParameter\"
+        )
+
+
 def permute_param_layout_(
     param: BasevLLMParameter, input_dim: int, output_dim: int, **kwargs
 ) -> BasevLLMParameter:
