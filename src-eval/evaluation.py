@@ -42,8 +42,8 @@ except ImportError:
     textstat = None
     print("[WARNING] 'textstat' is not installed. Text readability metrics will default to 0.0.", file=sys.stderr)
 
-# Single source of truth for max sequence/token length
-MAX_SEQUENCE_LENGTH = 8192
+# Context length for vLLM engine
+MAX_SEQUENCE_LENGTH = 16384
 
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
 
