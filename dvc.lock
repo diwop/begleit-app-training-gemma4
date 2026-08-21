@@ -18,15 +18,19 @@ stages:
       size: 3587
     - path: src-train/prepare_data.py
       hash: md5
-      md5: d8ea83812e8e45b38a9af45ca1f54e08
-      size: 2276
+      md5: 2629ab079dbd0861cdafb5372a517ce5
+      size: 8053
       isexec: true
     outs:
     - path: data/dataset_eval.jsonl
       hash: md5
-      md5: 26444c038ae69baee67e45101938a414
-      size: 947089
+      md5: ebbedfb53c671195550672ef64dc82e9
+      size: 1370378
     - path: data/dataset_train.jsonl
       hash: md5
-      md5: 5cb37f61ee9712ca84d958865ca4ea54
-      size: 6391613
+      md5: c7dec66fe21a009a569770541a47e149
+      size: 12456842
+    - path: data/dataset_train_sample.jsonl
+      hash: md5
+      md5: 994418c0f1bac9c20ed40c863a014d11
+      size: 270480
