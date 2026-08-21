@@ -198,12 +198,10 @@ def main() -> None:
         max_tokens=4096,
     )
 
-    # Pass 2: Calibrated Thinking Mode (temperature=1.0, top_p=0.95, top_k=64, retaining special tokens)
+    # Pass 2: Thinking Mode (temperature=0.0 greedy, max_tokens=4096, retaining special tokens)
     sampling_params_thinking = SamplingParams(
-        temperature=1.0,
-        top_p=0.95,
-        top_k=64,
-        max_tokens=8192,
+        temperature=0.0,
+        max_tokens=4096,
         skip_special_tokens=False,
     )
 
