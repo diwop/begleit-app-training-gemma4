@@ -279,7 +279,7 @@ def main() -> None:
             conv,
             tokenize=False,
             add_generation_prompt=True,
-            enable_thinking=False,
+            enable_thinking=True,
         )
         for conv in few_shot_conversations
     ]
@@ -337,13 +337,13 @@ def main() -> None:
     step2_elapsed = time.time() - step2_start
     print(f"[SUCCESS] Step 2 completed in {step2_elapsed:.1f}s ({step2_elapsed/len(records):.2f}s/sample)\n")
 
-    # STEP 3: Dynamic Few-Shot (2 semantically closest demonstrations)
+    # STEP 3: Dynamic Few-Shot WITH thinking (2 semantically closest demonstrations)
     print("=" * 60)
-    print(f"[STEP 3/3] Running Dynamic Few-Shot (2 retrieved examples) for {len(records)} samples...")
+    print(f"[STEP 3/3] Running Dynamic Few-Shot WITH thinking (enable_thinking=True, 2 retrieved examples) for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step3_start = time.time()
 
-    few_shot_outputs = engine.generate(prompts_few_shots, sampling_params_no_thinking)
+    few_shot_outputs = engine.generate(prompts_few_shots, sampling_params_thinking)
 
     step3_elapsed = time.time() - step3_start
     print(f"[SUCCESS] Step 3 completed in {step3_elapsed:.1f}s ({step3_elapsed/len(records):.2f}s/sample)\n")
@@ -377,7 +377,7 @@ def main() -> None:
         reasoning_trace, out_thinking = extract_gemma4_reasoning(raw_thinking_output)
 
         raw_few_shots = extract_output_text(few_shot_outputs[idx])
-        out_few_shots = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", raw_few_shots).strip()
+        few_shots_reasoning, out_few_shots = extract_gemma4_reasoning(raw_few_shots)
 
         raw_user_input = load_raw_standardsprache(rec["id"]) if rec["id"] not in ("i001", "i002") else rec["user"]
         if not raw_user_input:
@@ -414,6 +414,7 @@ def main() -> None:
             "assistant_gemma4_thinking_reasoning": reasoning_trace,
             "assistant_gemma4_thinking": out_thinking,
             "assistant_gemma4_thinking_metrics": gemma4_thinking_metrics,
+            "assistant_gemma4_dynamic_few_shots_reasoning": few_shots_reasoning,
             "assistant_gemma4_dynamic_few_shots": out_few_shots,
             "assistant_gemma4_dynamic_few_shots_metrics": gemma4_few_shots_metrics,
         }
@@ -447,7 +448,7 @@ def main() -> None:
         print(f"  * Ground Truth (Target)         : FRE = {avg_gt_fre:.1f}  |  WSTF = {avg_gt_wstf:.1f}")
         print(f"  * Gemma 4 (Zero-Shot)           : FRE = {avg_g4_fre:.1f}  |  WSTF = {avg_g4_wstf:.1f}")
         print(f"  * Gemma 4 (With Thinking)       : FRE = {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}")
-        print(f"  * Gemma 4 (Dynamic Few-Shots k=2): FRE = {avg_g4_few_fre:.1f}  |  WSTF = {avg_g4_few_wstf:.1f}")
+        print(f"  * Gemma 4 (Few-Shots + Thinking): FRE = {avg_g4_few_fre:.1f}  |  WSTF = {avg_g4_few_wstf:.1f}")
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
 
