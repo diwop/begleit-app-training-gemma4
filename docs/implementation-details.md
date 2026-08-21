@@ -1,15 +1,15 @@
 # Implementation Details
 
-This document records technical details, setup steps, and execution guidelines for running Axolotl fine-tuning, vLLM evaluation, and DVC data management on the **HSUper** GPU cluster (NVIDIA L40S nodes).
+This document records technical details, setup steps, and execution guidelines for running Axolotl fine-tuning, SGLang evaluation, and DVC data management on the **HSUper** GPU cluster (NVIDIA L40S nodes).
 
 ---
 
-## 1. Axolotl & vLLM Cluster GPU Smoke Test
+## 1. Axolotl & SGLang Cluster GPU Smoke Test
 
 ### Overview
 The smoke test verifies that:
-1. The **Axolotl** Docker container (`train_image` in `README.md`) and **vLLM** Docker container (`eval_image` in `README.md`) execute seamlessly under **Apptainer** on HSUper GPU nodes (`small_gpu8`).
-2. Axolotl, vLLM, and essential ML frameworks are installed and functional in their respective container environments.
+1. The **Axolotl** Docker container (`train_image` in `README.md`) and **SGLang** Docker container (`eval_image` in `README.md`) execute seamlessly under **Apptainer** on HSUper GPU nodes (`small_gpu8`).
+2. Axolotl, SGLang, and essential ML frameworks are installed and functional in their respective container environments.
 3. PyTorch detects NVIDIA L40S GPUs with full CUDA capability and reports correct VRAM capacity (~44 GB free per GPU).
 
 ---
@@ -32,7 +32,7 @@ The smoke test verifies that:
      ```
    - Mounting to `/repo` (instead of `/workspace`) ensures that container-specific virtual environments (such as `/workspace/axolotl-venv/bin/python` in Axolotl) remain intact and accessible.
    - For Axolotl: Executes `/workspace/axolotl-venv/bin/python /repo/src-train/smoke_test.py`.
-   - For vLLM: Executes `python3 /repo/src-eval/smoke_test.py`.
+   - For SGLang: Executes `python3 /repo/src-eval/smoke_test.py`.
 
 ---
 
@@ -52,7 +52,7 @@ The smoke test verifies that:
    ```bash
    bash scripts/prepare_images.sh
    ```
-   *(This extracts `train_image` and `eval_image` strictly from `README.md` frontmatter and builds `images/axolotl_sandbox` and `images/vllm_sandbox` on the shared filesystem).*
+   *(This extracts `train_image` and `eval_image` strictly from `README.md` frontmatter and builds `images/axolotl_sandbox` and `images/sglang_sandbox` on the shared filesystem).*
 
 #### Option 1: Interactive Node
 
@@ -115,7 +115,7 @@ The smoke test verifies that:
   BitsAndBytes   : 0.50.0
   Flash-Attn     : Not Installed
   Triton         : 3.7.0
-  vLLM           : Not Installed
+  SGLang         : Not Installed
 
 [PyTorch & CUDA Environment]
   PyTorch        : 2.12.0+cu130
@@ -137,11 +137,11 @@ The smoke test verifies that:
       Free VRAM          : 44.00 GB
 ============================================================
 
-[STEP 2/2] Executing vLLM Evaluation Container Smoke Test...
-[INFO] Container: .../images/vllm_sandbox
-[INFO] Using vLLM Container Python: /usr/bin/python3
+[STEP 2/2] Executing SGLang Evaluation Container Smoke Test...
+[INFO] Container: .../images/sglang_sandbox
+[INFO] Using SGLang Container Python: /usr/bin/python3
 ============================================================
-      vLLM Evaluation Cluster Environment Smoke Test
+      SGLang Evaluation Cluster Environment Smoke Test
 ============================================================
 
 [System Info]
@@ -149,10 +149,10 @@ The smoke test verifies that:
   Platform       : Linux-...
 
 [Inference Core Libraries]
-  vLLM           : 0.27.1
-  Transformers   : 5.15.0
-  Ray            : Not Installed
-  TrtLLM         : Not Installed
+  SGLang         : 0.5.17
+  Transformers   : 5.x.x
+  Ray            : Installed
+  FlashInfer     : Installed
 
 [PyTorch & CUDA Environment]
   PyTorch        : 2.5.x+cu124
@@ -174,7 +174,7 @@ The smoke test verifies that:
 ============================================================
 
 ============================================================
-[SUCCESS] Both Training (Axolotl) and Evaluation (vLLM) smoke tests completed!
+[SUCCESS] Both Training (Axolotl) and Evaluation (SGLang) smoke tests completed!
 ============================================================
 ```
 
@@ -291,7 +291,7 @@ dvc repro
 
 ## 3. Gemma 4 Baseline Evaluation (`src-eval/evaluation.py`)
 
-Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **vLLM** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
+Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **SGLang** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
 1. **Standard Translation** (`chat_template_kwargs={"enable_thinking": False}`)
 2. **Thinking-Enabled Translation** (`chat_template_kwargs={"enable_thinking": True}`)
 
@@ -346,12 +346,12 @@ Fine-tunes a LoRA adapter on `google/gemma-4-26b-a4b-it` using **Axolotl** with 
 
 ### Key Architecture & Configuration Decisions
 
-1. **MoE LoRA Module Regex Targeting (vLLM Compatibility)**:
+1. **MoE LoRA Module Regex Targeting (SGLang & vLLM Compatibility)**:
    Gemma 4 26B-A4B integrates vision components where bare suffixes like `gate_proj` match vision layers wrapped by `Gemma4ClippableLinear`. Targeting only the language model layers:
    ```yaml
    lora_target_modules: 'model\.language_model\.layers\.[\d]+\.(_checkpoint_wrapped_module\.)?(mlp|self_attn)\.(up|down|gate|q|k|v|o)_proj'
    ```
-   ensures PEFT cleanly merges/saves the weights and vLLM can load the MoE adapter seamlessly during inference.
+   ensures PEFT cleanly merges/saves the weights and inference engines like SGLang can load the MoE adapter seamlessly during inference.
 
 2. **Gemma 4 Turn Boundaries**:
    Turn endings are marked by `<turn|>` (`id: 106`), not `<end_of_turn>` (Gemma 3). Configured explicitly via:

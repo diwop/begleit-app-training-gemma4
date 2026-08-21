@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Helper script to run Axolotl (Train) and vLLM (Eval) smoke tests in sequence inside Apptainer.
+# Helper script to run Axolotl (Train) and SGLang (Eval) smoke tests in sequence inside Apptainer.
 # Usage:
 #   bash scripts/run_smoke_test.sh
 # ==============================================================================
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 AXOLOTL_SANDBOX="${WORKSPACE_ROOT}/images/axolotl_sandbox"
-VLLM_SANDBOX="${WORKSPACE_ROOT}/images/vllm_sandbox"
+SGLANG_SANDBOX="${WORKSPACE_ROOT}/images/sglang_sandbox"
 
 MISSING=0
 if [ ! -d "${AXOLOTL_SANDBOX}" ]; then
@@ -19,8 +19,8 @@ if [ ! -d "${AXOLOTL_SANDBOX}" ]; then
   MISSING=1
 fi
 
-if [ ! -d "${VLLM_SANDBOX}" ]; then
-  echo "[ERROR] vLLM container sandbox directory not found at: ${VLLM_SANDBOX}"
+if [ ! -d "${SGLANG_SANDBOX}" ]; then
+  echo "[ERROR] SGLang container sandbox directory not found at: ${SGLANG_SANDBOX}"
   MISSING=1
 fi
 
@@ -48,17 +48,17 @@ apptainer exec --nv \
   "${AXOLOTL_SANDBOX}" \
   /workspace/axolotl-venv/bin/python /repo/src-train/smoke_test.py
 
-# Step 2: Run vLLM Evaluation Smoke Test
+# Step 2: Run SGLang Evaluation Smoke Test
 echo ""
-echo "[STEP 2/2] Executing vLLM Evaluation Container Smoke Test..."
-echo "[INFO] Container: ${VLLM_SANDBOX}"
+echo "[STEP 2/2] Executing SGLang Evaluation Container Smoke Test..."
+echo "[INFO] Container: ${SGLANG_SANDBOX}"
 apptainer exec --nv \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --pwd /repo \
-  "${VLLM_SANDBOX}" \
+  "${SGLANG_SANDBOX}" \
   /usr/bin/python3 /repo/src-eval/smoke_test.py
 
 echo ""
 echo "============================================================"
-echo "[SUCCESS] Both Training (Axolotl) and Evaluation (vLLM) smoke tests completed!"
+echo "[SUCCESS] Both Training (Axolotl) and Evaluation (SGLang) smoke tests completed!"
 echo "============================================================"

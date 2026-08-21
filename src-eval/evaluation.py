@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Runs baseline evaluation for RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic on data/dataset_eval.jsonl.
+Runs baseline evaluation for RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic on data/dataset_eval.jsonl using SGLang.
 Evaluates the model twice:
 1. Standard generation (without thinking: chat_template_kwargs={"enable_thinking": False})
 2. Thinking-enabled generation (with thinking: chat_template_kwargs={"enable_thinking": True})
-   with calibrated sampling (temperature=1.0, top_p=0.95, top_k=64, skip_special_tokens=False)
+   with calibrated sampling (temperature=1.0, top_p=0.95, top_k=64)
 
 Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts.
 """
@@ -29,10 +29,11 @@ os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
 import torch
 
 try:
-    from vllm import LLM, SamplingParams
+    import sglang as sgl
+    from transformers import AutoTokenizer
 except ImportError:
-    print("[ERROR] vLLM is not installed in the current environment.", file=sys.stderr)
-    print("[INFO] Please run this script inside the vLLM container (images/vllm_sandbox).", file=sys.stderr)
+    print("[ERROR] SGLang is not installed in the current environment.", file=sys.stderr)
+    print("[INFO] Please run this script inside the SGLang container (images/sglang_sandbox).", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -42,7 +43,7 @@ except ImportError:
     textstat = None
     print("[WARNING] 'textstat' is not installed. Text readability metrics will default to 0.0.", file=sys.stderr)
 
-# Context length for vLLM engine
+# Context length for SGLang engine
 MAX_SEQUENCE_LENGTH = 16384
 
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
@@ -170,11 +171,20 @@ def get_integrity_checks(default_system_prompt: str) -> list[dict[str, str | Non
     return [i001, i002]
 
 
+def extract_output_text(output_obj: object) -> str:
+    """Extract string response from SGLang output item."""
+    if isinstance(output_obj, dict):
+        return output_obj.get("text", "").strip()
+    if hasattr(output_obj, "text"):
+        return output_obj.text.strip()
+    return str(output_obj).strip()
+
+
 def main() -> None:
     overall_start_time = time.time()
 
     print("=" * 60)
-    print("      Gemma 4 Baseline Evaluation (vLLM)")
+    print("      Gemma 4 Baseline Evaluation (SGLang)")
     print("=" * 60)
     print(f"[INFO] Model            : {MODEL_NAME}")
     print(f"[INFO] Input Dataset    : {EVAL_DATA_PATH}")
@@ -199,27 +209,11 @@ def main() -> None:
     # Get local offline snapshot path on disk (fail fast if missing)
     model_path = get_model_snapshot_path(MODEL_NAME)
 
-    # Initialize vLLM model with robust Gemma 4 FP8 configuration
-    print(f"\n[INFO] Initializing vLLM engine and loading model weights from: {model_path}")
-    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    model_load_start = time.time()
+    # Initialize Tokenizer for chat template formatting
+    print(f"\n[INFO] Loading tokenizer from snapshot: {model_path}")
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-    llm = LLM(
-        model=model_path,
-        tensor_parallel_size=tensor_parallel_size,
-        trust_remote_code=True,
-        dtype="bfloat16",
-        enforce_eager=True,
-        disable_custom_all_reduce=True,
-        gpu_memory_utilization=0.90,
-        max_model_len=MAX_SEQUENCE_LENGTH,
-        disable_log_stats=False,
-    )
-
-    model_load_elapsed = time.time() - model_load_start
-    print(f"[SUCCESS] vLLM engine & weights ready in {model_load_elapsed:.1f}s ({time.strftime('%Y-%m-%d %H:%M:%S')})\n")
-
-    # Standard chat conversations for both passes
+    # Format conversations into prompts
     conversations = [
         [
             {"role": "system", "content": rec["system"]},
@@ -228,21 +222,54 @@ def main() -> None:
         for rec in records
     ]
 
-    # Sampling parameters:
-    # Pass 1: Zero-Shot Greedy (temperature=0.0)
-    sampling_params_no_thinking = SamplingParams(
-        temperature=0.0,
-        max_tokens=4096,
+    prompts_no_thinking = [
+        tokenizer.apply_chat_template(
+            conv,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+        for conv in conversations
+    ]
+
+    prompts_thinking = [
+        tokenizer.apply_chat_template(
+            conv,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=True,
+        )
+        for conv in conversations
+    ]
+
+    # Initialize SGLang Engine
+    print(f"\n[INFO] Initializing SGLang engine and loading model weights from: {model_path}")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    model_load_start = time.time()
+
+    engine = sgl.Engine(
+        model_path=model_path,
+        tp_size=tensor_parallel_size,
+        trust_remote_code=True,
+        mem_fraction_static=0.85,
+        context_length=MAX_SEQUENCE_LENGTH,
     )
 
-    # Pass 2: Calibrated Thinking Mode (Google recommended: T=1.0, top_p=0.95, top_k=64, retaining special tokens)
-    sampling_params_thinking = SamplingParams(
-        temperature=1.0,
-        top_p=0.95,
-        top_k=64,
-        max_tokens=8192,
-        skip_special_tokens=False,
-    )
+    model_load_elapsed = time.time() - model_load_start
+    print(f"[SUCCESS] SGLang engine & weights ready in {model_load_elapsed:.1f}s ({time.strftime('%Y-%m-%d %H:%M:%S')})\n")
+
+    # Sampling parameters
+    sampling_params_no_thinking = {
+        "temperature": 0.0,
+        "max_new_tokens": 4096,
+    }
+
+    sampling_params_thinking = {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_new_tokens": 8192,
+    }
 
     # STEP 1: Standard Inference
     print("=" * 60)
@@ -250,12 +277,7 @@ def main() -> None:
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step1_start = time.time()
 
-    no_thinking_outputs = llm.chat(
-        messages=conversations,
-        sampling_params=sampling_params_no_thinking,
-        chat_template_kwargs={"enable_thinking": False},
-        use_tqdm=True,
-    )
+    no_thinking_outputs = engine.generate(prompts_no_thinking, sampling_params_no_thinking)
 
     step1_elapsed = time.time() - step1_start
     print(f"[SUCCESS] Step 1 completed in {step1_elapsed:.1f}s ({step1_elapsed/len(records):.2f}s/sample)\n")
@@ -266,12 +288,7 @@ def main() -> None:
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step2_start = time.time()
 
-    thinking_outputs = llm.chat(
-        messages=conversations,
-        sampling_params=sampling_params_thinking,
-        chat_template_kwargs={"enable_thinking": True},
-        use_tqdm=True,
-    )
+    thinking_outputs = engine.generate(prompts_thinking, sampling_params_thinking)
 
     step2_elapsed = time.time() - step2_start
     print(f"[SUCCESS] Step 2 completed in {step2_elapsed:.1f}s ({step2_elapsed/len(records):.2f}s/sample)\n")
@@ -286,8 +303,8 @@ def main() -> None:
     wstf_scores = {"input": [], "ground_truth": [], "gemma4": [], "gemma4_thinking": []}
 
     for idx, rec in enumerate(records):
-        out_no_thinking = no_thinking_outputs[idx].outputs[0].text.strip()
-        raw_thinking_output = thinking_outputs[idx].outputs[0].text.strip()
+        out_no_thinking = extract_output_text(no_thinking_outputs[idx])
+        raw_thinking_output = extract_output_text(thinking_outputs[idx])
         reasoning_trace, out_thinking = extract_gemma4_reasoning(raw_thinking_output)
 
         raw_user_input = load_raw_standardsprache(rec["id"]) if rec["id"] not in ("i001", "i002") else rec["user"]
