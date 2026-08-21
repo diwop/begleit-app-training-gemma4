@@ -395,6 +395,48 @@ def _adjust_shard_indexes_for_packing(
             marlin_tile_size=marlin_tile_size,
         )
     return shard_size, shard_offset
+
+
+def permute_param_layout_(
+    param: BasevLLMParameter, input_dim: int, output_dim: int, **kwargs
+) -> BasevLLMParameter:
+    curr_input_dim = getattr(param, \"input_dim\", None)
+    curr_output_dim = getattr(param, \"output_dim\", None)
+
+    if curr_input_dim is None or curr_output_dim is None:
+        assert param.data.dim() == 2, (
+            \"permute_param_layout_ only supports 2D parameters when either \"
+            \"input_dim or output_dim is not set\"
+        )
+
+    if curr_input_dim is None:
+        assert curr_output_dim is not None, \"either input or output dim must be set\"
+        curr_input_dim = (curr_output_dim + 1) % 2
+    if curr_output_dim is None:
+        assert curr_input_dim is not None, \"either input or output dim must be set\"
+        curr_output_dim = (curr_input_dim + 1) % 2
+
+    perm = [
+        i for i in range(param.data.dim()) if i not in [curr_input_dim, curr_output_dim]
+    ]
+    perm.insert(input_dim, curr_input_dim)
+    perm.insert(output_dim, curr_output_dim)
+
+    if \"packed_dim\" in kwargs:
+        assert (
+            hasattr(param, \"packed_dim\")
+            and param.packed_dim == perm[kwargs[\"packed_dim\"]]
+        ), \"permute_param_layout_ currently doesn't support repacking\"
+
+    param.data = param.data.permute(*perm)
+    if hasattr(param, \"_input_dim\"):
+        param._input_dim = input_dim
+    if hasattr(param, \"_output_dim\"):
+        param._output_dim = output_dim
+    if \"packed_dim\" in kwargs and hasattr(param, \"_packed_dim\"):
+        param._packed_dim = kwargs[\"packed_dim\"]
+
+    return param
 '''
 
 compile(code, '${param_file}', 'exec')
