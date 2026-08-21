@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Smoke test script for vLLM evaluation environment.
-Prints vLLM version, PyTorch CUDA support, and detailed GPU hardware/VRAM statistics.
+Smoke test script for SGLang evaluation environment.
+Prints SGLang version, PyTorch CUDA support, and detailed GPU hardware/VRAM statistics.
 """
 
 import importlib
@@ -20,7 +20,7 @@ def get_pkg_version(pkg_name: str) -> str:
 
 def main() -> None:
     print("=" * 60)
-    print("      vLLM Evaluation Cluster Environment Smoke Test")
+    print("      SGLang Evaluation Cluster Environment Smoke Test")
     print("=" * 60)
 
     # 1. System & Python Info
@@ -28,19 +28,20 @@ def main() -> None:
     print(f"  Python Version : {sys.version.split()[0]}")
     print(f"  Platform       : {platform.platform()}")
 
-    # 2. vLLM & Core Inference Libraries
+    # 2. SGLang & Core Inference Libraries
     print("\n[Inference Core Libraries]")
     
-    vllm_ver = get_pkg_version("vllm")
-    if vllm_ver == "Not Installed":
+    sglang_ver = get_pkg_version("sglang")
+    if sglang_ver == "Not Installed":
         try:
-            vllm = importlib.import_module("vllm")
-            vllm_ver = str(getattr(vllm, "__version__", "Installed (unknown version)"))
+            sgl = importlib.import_module("sglang")
+            sglang_ver = str(getattr(sgl, "__version__", "Installed (unknown version)"))
         except ImportError:
-            vllm_ver = "Not Installed / Import Failed"
+            sglang_ver = "Not Installed / Import Failed"
 
-    print(f"  vLLM           : {vllm_ver}")
+    print(f"  SGLang         : {sglang_ver}")
     print(f"  Transformers   : {get_pkg_version('transformers')}")
+    print(f"  FlashInfer     : {get_pkg_version('flashinfer')}")
     print(f"  Ray            : {get_pkg_version('ray')}")
     print(f"  TrtLLM         : {get_pkg_version('tensorrt_llm')}")
 

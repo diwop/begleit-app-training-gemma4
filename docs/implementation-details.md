@@ -1,15 +1,15 @@
 # Implementation Details
 
-This document records technical details, setup steps, and execution guidelines for running Axolotl fine-tuning, vLLM evaluation, and DVC data management on the **HSUper** GPU cluster (NVIDIA L40S nodes).
+This document records technical details, setup steps, and execution guidelines for running Axolotl fine-tuning, SGLang evaluation, and DVC data management on the **HSUper** GPU cluster (NVIDIA L40S nodes).
 
 ---
 
-## 1. Axolotl & vLLM Cluster GPU Smoke Test
+## 1. Axolotl & SGLang Cluster GPU Smoke Test
 
 ### Overview
 The smoke test verifies that:
-1. The **Axolotl** Docker container (`train_image` in `README.md`) and **vLLM** Docker container (`eval_image` in `README.md`) execute seamlessly under **Apptainer** on HSUper GPU nodes (`small_gpu8`).
-2. Axolotl, vLLM, and essential ML frameworks are installed and functional in their respective container environments.
+1. The **Axolotl** Docker container (`train_image` in `README.md`) and **SGLang** Docker container (`eval_image` in `README.md`) execute seamlessly under **Apptainer** on HSUper GPU nodes (`small_gpu8`).
+2. Axolotl, SGLang, and essential ML frameworks are installed and functional in their respective container environments.
 3. PyTorch detects NVIDIA L40S GPUs with full CUDA capability and reports correct VRAM capacity (~44 GB free per GPU).
 
 ---
@@ -32,7 +32,7 @@ The smoke test verifies that:
      ```
    - Mounting to `/repo` (instead of `/workspace`) ensures that container-specific virtual environments (such as `/workspace/axolotl-venv/bin/python` in Axolotl) remain intact and accessible.
    - For Axolotl: Executes `/workspace/axolotl-venv/bin/python /repo/src-train/smoke_test.py`.
-   - For vLLM: Executes `python3 /repo/src-eval/smoke_test.py`.
+   - For SGLang: Executes `python3 /repo/src-eval/smoke_test.py`.
 
 ---
 
@@ -52,7 +52,7 @@ The smoke test verifies that:
    ```bash
    bash scripts/prepare_images.sh
    ```
-   *(This extracts `train_image` and `eval_image` strictly from `README.md` frontmatter and builds `images/axolotl_sandbox` and `images/vllm_sandbox` on the shared filesystem).*
+   *(This extracts `train_image` and `eval_image` strictly from `README.md` frontmatter and builds `images/axolotl_sandbox` and `images/sglang_sandbox` on the shared filesystem).*
 
 #### Option 1: Interactive Node
 
@@ -115,7 +115,7 @@ The smoke test verifies that:
   BitsAndBytes   : 0.50.0
   Flash-Attn     : Not Installed
   Triton         : 3.7.0
-  vLLM           : Not Installed
+  SGLang         : Not Installed
 
 [PyTorch & CUDA Environment]
   PyTorch        : 2.12.0+cu130
@@ -137,11 +137,11 @@ The smoke test verifies that:
       Free VRAM          : 44.00 GB
 ============================================================
 
-[STEP 2/2] Executing vLLM Evaluation Container Smoke Test...
-[INFO] Container: .../images/vllm_sandbox
-[INFO] Using vLLM Container Python: /usr/bin/python3
+[STEP 2/2] Executing SGLang Evaluation Container Smoke Test...
+[INFO] Container: .../images/sglang_sandbox
+[INFO] Using SGLang Container Python: /usr/bin/python3
 ============================================================
-      vLLM Evaluation Cluster Environment Smoke Test
+      SGLang Evaluation Cluster Environment Smoke Test
 ============================================================
 
 [System Info]
@@ -149,10 +149,10 @@ The smoke test verifies that:
   Platform       : Linux-...
 
 [Inference Core Libraries]
-  vLLM           : 0.27.1
-  Transformers   : 5.15.0
-  Ray            : Not Installed
-  TrtLLM         : Not Installed
+  SGLang         : 0.5.17
+  Transformers   : 5.x.x
+  Ray            : Installed
+  FlashInfer     : Installed
 
 [PyTorch & CUDA Environment]
   PyTorch        : 2.5.x+cu124
@@ -174,7 +174,7 @@ The smoke test verifies that:
 ============================================================
 
 ============================================================
-[SUCCESS] Both Training (Axolotl) and Evaluation (vLLM) smoke tests completed!
+[SUCCESS] Both Training (Axolotl) and Evaluation (SGLang) smoke tests completed!
 ============================================================
 ```
 
@@ -250,33 +250,21 @@ To upload raw dataset files from your local machine to the remote S3 bucket:
 
 > **IMPORTANT**: Run `dvc pull` on the **login node** (`hsuper-login01`), as compute nodes do not have outbound internet access.
 
-Because system Python, AWS CLI, and DVC are not pre-installed on the login node host OS, the **recommended method** is to use **Apptainer** with a workspace virtual environment (`.dvc-venv`).
+Use the helper script [`scripts/pull_data.sh`](file:///Users/christophwulf/github/diwop/begleit-app-training-gemma4/scripts/pull_data.sh) which automatically manages the workspace virtual environment and pulls all DVC data from S3:
 
-#### Step-by-Step Execution on `hsuper-login01`:
+```bash
+# 1. SSH to HSUper login node
+ssh <hsu-name>@hsuper-login01.hsu-hh.de
 
-1. **SSH to HSUper login node**:
-   ```bash
-   ssh <hsu-name>@hsuper-login01.hsu-hh.de
-   ```
+# 2. Navigate to repo and pull Git changes
+cd $HOME/begleit-app-training-gemma4
+git pull
 
-2. **Navigate to repository and pull latest Git changes**:
-   ```bash
-   cd $HOME/begleit-app-training-gemma4
-   git pull
-   ```
+# 3. Pull dataset files from AWS S3
+bash scripts/pull_data.sh
+```
 
-3. **Initialize workspace DVC environment (one-time setup)**:
-   ```bash
-   apptainer exec --bind "$PWD:/repo" --pwd /repo images/axolotl_sandbox uv venv /repo/.dvc-venv
-   apptainer exec --bind "$PWD:/repo" --pwd /repo images/axolotl_sandbox uv pip install --python /repo/.dvc-venv "dvc[s3]"
-   ```
-
-4. **Pull dataset files from AWS S3**:
-   ```bash
-   apptainer exec --bind "$PWD:/repo" --pwd /repo images/axolotl_sandbox /repo/.dvc-venv/bin/dvc pull
-   ```
-
-Once `dvc pull` finishes, `data/raw/` on the shared filesystem is fully populated and immediately ready for offline GPU training on compute nodes!
+Once `pull_data.sh` finishes, `data/raw/` (and generated dataset files) on the shared filesystem are fully populated and immediately ready for offline GPU training on compute nodes!
 
 ---
 
@@ -297,4 +285,109 @@ A reproducible DVC stage in [dvc.yaml](file:///Users/christophwulf/github/diwop/
 To run or reproduce the data preparation stage:
 ```bash
 dvc repro
+```
+
+---
+
+## 3. Gemma 4 Baseline Evaluation (`src-eval/evaluation.py`)
+
+Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **SGLang** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
+1. **Standard Translation** (`chat_template_kwargs={"enable_thinking": False}`)
+2. **Thinking-Enabled Translation** (`chat_template_kwargs={"enable_thinking": True}`)
+
+Produces `data/results.jsonl` with German textstat readability metrics (`fre` = Flesch Reading Ease, `wstf` = Wiener Sachtextformel):
+```json
+{
+  "id": "<id>",
+  "system": "<system-prompt>",
+  "user_input": "<raw input text without template wrapper>",
+  "user_input_metrics": { "fre": 45.2, "wstf": 11.4 },
+  "assistant": "<ground-truth Leichte_Sprache>",
+  "assistant_metrics": { "fre": 88.5, "wstf": 4.1 },
+  "assistant_gemma4": "<gemma4 output without thinking>",
+  "assistant_gemma4_metrics": { "fre": 82.1, "wstf": 5.2 },
+  "assistant_gemma4_thinking": "<gemma4 output with thinking>",
+  "assistant_gemma4_thinking_metrics": { "fre": 85.3, "wstf": 4.6 }
+}
+```
+
+### Pre-download Model on Login Node (`hsuper-login01`)
+
+Because GPU compute nodes do not have internet access, download the model weights to the shared Hugging Face cache on the login node first:
+
+```bash
+# Optional: Set HF token if accessing gated models
+export HF_TOKEN="hf_..."
+
+# Download model to ~/.cache/huggingface on the shared filesystem
+bash scripts/download_model.sh
+```
+
+### Run Evaluation on GPU Compute Node
+
+#### Option 1: Interactive Node (`salloc`)
+```bash
+salloc --partition=small_gpu8 --gpus 1 --time=00:30:00
+ssh <assigned-gpu-node>
+cd $HOME/begleit-app-training-gemma4
+bash scripts/run_evaluation.sh
+```
+
+#### Option 2: Queue with Slurm (`sbatch`)
+```bash
+sbatch scripts/submit_evaluation.sbatch
+```
+
+---
+
+## 4. Gemma 4 MoE Adapter Fine-Tuning (`src-train/config.yml`)
+
+Fine-tunes a LoRA adapter on `google/gemma-4-26b-a4b-it` using **Axolotl** with **DeepSpeed ZeRO-3** CPU offloading across 2+ NVIDIA L40S GPUs.
+
+### Key Architecture & Configuration Decisions
+
+1. **MoE LoRA Module Regex Targeting (SGLang & vLLM Compatibility)**:
+   Gemma 4 26B-A4B integrates vision components where bare suffixes like `gate_proj` match vision layers wrapped by `Gemma4ClippableLinear`. Targeting only the language model layers:
+   ```yaml
+   lora_target_modules: 'model\.language_model\.layers\.[\d]+\.(_checkpoint_wrapped_module\.)?(mlp|self_attn)\.(up|down|gate|q|k|v|o)_proj'
+   ```
+   ensures PEFT cleanly merges/saves the weights and inference engines like SGLang can load the MoE adapter seamlessly during inference.
+
+2. **Gemma 4 Turn Boundaries**:
+   Turn endings are marked by `<turn|>` (`id: 106`), not `<end_of_turn>` (Gemma 3). Configured explicitly via:
+   ```yaml
+   special_tokens:
+     eos_token: "<eos>"
+   eot_tokens:
+     - "<turn|>"
+   ```
+
+3. **Multi-GPU & DeepSpeed ZeRO-3**:
+   - Requires at least 2 GPUs (`scripts/run_training.sh` automatically verifies GPU count and fails fast if `< 2`).
+   - DeepSpeed ZeRO-3 offloads optimizer states and parameters to CPU RAM (`src-train/deepspeed_zero3.json`), enabling unquantized bfloat16 training of 26B MoE parameters.
+
+4. **Fast Initial Smoke Verification vs. Full Run**:
+   - Initial verification uses `data/dataset_train_sample.jsonl` (first 10 samples) and `num_epochs: 1` (`#SBATCH --time=00:30:00`).
+   - For full training, switch `datasets.path` in `src-train/config.yml` to `data/dataset_train.jsonl` and set `num_epochs: 3`.
+
+### Pre-download Training & Evaluation Models
+
+On the **login node** (`hsuper-login01`):
+```bash
+bash scripts/download_model.sh
+```
+
+### Run Fine-Tuning on GPU Compute Node
+
+#### Option 1: Interactive Node (`salloc`)
+```bash
+salloc --partition=small_gpu8 --gpus 2 --time=00:30:00
+ssh <assigned-gpu-node>
+cd $HOME/begleit-app-training-gemma4
+bash scripts/run_training.sh
+```
+
+#### Option 2: Queue with Slurm (`sbatch`)
+```bash
+sbatch scripts/submit_training.sbatch
 ```

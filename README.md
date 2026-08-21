@@ -1,16 +1,16 @@
 ---
 train_image: axolotlai/axolotl:0.18.0
-eval_image: vllm/vllm-openai:v0.27.1
+eval_image: lmsysorg/sglang:v0.5.17-cu130-runtime
 ---
 
 # BegleitApp Training (Gemma 4 on HSUper)
 
-This is repository contains code to fine-tune and evaluate adapters for
+This repository contains code to fine-tune and evaluate adapters for
 [Google Gemma 4 26B-A4B](https://huggingface.co/google/gemma-4-26B-A4B-it)
 on the [HSUper](https://www.hsu-hh.de/hpc/en/hsuper/) GPU infrastructure.  
-[Axolotl](https://axolotl.ai) us used to train the adapter for the Mixture of
-Experts model in a way that [vLLM](https://vllm.ai) is capable of providing
-inference on the base model with the tuned adapter.
+[Axolotl](https://axolotl.ai) is used to train the adapter for the Mixture of
+Experts model, and [SGLang](https://sglang.ai) is used to provide high-performance
+inference on the quantized base model merged with the tuned adapter.
 
 Training and evaluation is desined for **NVIDIA L40S GPUs** as provided by HSUper.
 

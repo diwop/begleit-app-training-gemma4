@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Helper script to pull and prepare both Axolotl and vLLM Apptainer containers on login node.
+# Helper script to pull and prepare both Axolotl and SGLang Apptainer containers on login node.
 # Reads 'train_image' and 'eval_image' strictly from README.md YAML frontmatter.
-# Builds Sandbox Directory containers (images/axolotl_sandbox and images/vllm_sandbox).
+# Builds Sandbox Directory containers (images/axolotl_sandbox and images/sglang_sandbox).
 # NOTE: Run this command on the LOGIN node (hsuper-login01) which has internet access.
 #
 # Usage:
-#   bash scripts/prepare_images.sh [all|train|eval]
+#   bash scripts/prepare_images.sh [all|train|eval|verify]
 # ==============================================================================
 
 set -euo pipefail
@@ -75,19 +75,48 @@ build_sandbox() {
   echo "[SUCCESS] ${name} sandbox container ready at: ${target_dir}"
 }
 
+verify_sglang_container() {
+  local sandbox_dir="${OUTPUT_DIR}/sglang_sandbox"
+  if [ ! -d "${sandbox_dir}" ]; then
+    echo "[WARNING] Sandbox directory '${sandbox_dir}' not found."
+    return
+  fi
+  echo "[INFO] Running verification test inside SGLang Apptainer container..."
+  apptainer exec "${sandbox_dir}" /usr/bin/python3 -c "
+import sglang as sgl
+print('  * [VERIFIED] SGLang version:', sgl.__version__)
+import torch
+print('  * [VERIFIED] PyTorch version:', torch.__version__)
+import transformers
+print('  * [VERIFIED] Transformers version:', transformers.__version__)
+print('  * [SUCCESS] SGLang container ready and verified!')
+"
+}
+
 case "${TARGET}" in
   train)
     build_sandbox "axolotl" "${TRAIN_IMAGE}"
     ;;
   eval)
-    build_sandbox "vllm" "${EVAL_IMAGE}"
+    build_sandbox "sglang" "${EVAL_IMAGE}"
+    echo "[INFO] Installing 'textstat' in SGLang environment on login node..."
+    mkdir -p "${HOME}/.local"
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat
+    verify_sglang_container
     ;;
   all)
     build_sandbox "axolotl" "${TRAIN_IMAGE}"
-    build_sandbox "vllm" "${EVAL_IMAGE}"
+    build_sandbox "sglang" "${EVAL_IMAGE}"
+    echo "[INFO] Installing 'textstat' in SGLang environment on login node..."
+    mkdir -p "${HOME}/.local"
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat
+    verify_sglang_container
+    ;;
+  verify)
+    verify_sglang_container
     ;;
   *)
-    echo "[ERROR] Unknown target: '${TARGET}'. Usage: $0 [all|train|eval]"
+    echo "[ERROR] Unknown target: '${TARGET}'. Usage: $0 [all|train|eval|verify]"
     exit 1
     ;;
 esac

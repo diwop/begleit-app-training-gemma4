@@ -14,19 +14,23 @@ stages:
       size: 207
     - path: prompts/system-prompt.md
       hash: md5
-      md5: 702bb6cd55b5f8b86fcedfb816e67e7c
-      size: 3626
+      md5: e06731bfd3e04e40505d9c092be51b3d
+      size: 3587
     - path: src-train/prepare_data.py
       hash: md5
-      md5: d8ea83812e8e45b38a9af45ca1f54e08
-      size: 2276
+      md5: 2629ab079dbd0861cdafb5372a517ce5
+      size: 8053
       isexec: true
     outs:
     - path: data/dataset_eval.jsonl
       hash: md5
-      md5: ff278b5c4bad99a7fdf57769f93972ea
-      size: 950131
+      md5: ebbedfb53c671195550672ef64dc82e9
+      size: 1370378
     - path: data/dataset_train.jsonl
       hash: md5
-      md5: 306e5318a25dbacf9a09a7502925937a
-      size: 6418952
+      md5: c7dec66fe21a009a569770541a47e149
+      size: 12456842
+    - path: data/dataset_train_sample.jsonl
+      hash: md5
+      md5: 994418c0f1bac9c20ed40c863a014d11
+      size: 270480
