@@ -56,14 +56,25 @@ RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
 def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
     """
     Extracts reasoning trace and final clean text from Gemma 4 thinking output.
-    Handles <|channel>thought ... <channel|>, <|thought|> ... </thought>, etc.
+    Handles:
+      - Standard Gemma 4 channel tokens: <|channel>thought\n...<channel|>\n...
+      - Alternative delimiters: <|thought|> ... </thought>
     """
-    pattern = r"(?:<\|channel>thought|<\|thought\|>|<\|channel\|>thought|<\|channel>)\s*(.*?)(?:<channel\|>|<\|channel\|>|</thought>|$)"
-    match = re.search(pattern, text, flags=re.DOTALL)
-
-    if match and match.group(1).strip():
+    # 1. Standard Gemma 4 channel tokens with special tokens preserved (<|channel>thought ... <channel|>)
+    pattern_gemma4 = r"<\|channel>thought\s*(.*?)(?:<channel\|>|<\|channel\|>|$)"
+    match = re.search(pattern_gemma4, text, flags=re.DOTALL)
+    if match:
         reasoning = match.group(1).strip()
-        clean_text = re.sub(pattern, "", text, flags=re.DOTALL).strip()
+        clean_text = text[match.end():].strip()
+        clean_text = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", clean_text).strip()
+        return reasoning, clean_text
+
+    # 2. General thought delimiters (<|thought|> ... </thought>)
+    pattern_general = r"(?:<\|thought\|>|<\|channel\|>thought)\s*(.*?)(?:</thought>|<\|channel\|>|<channel\|>|$)"
+    match = re.search(pattern_general, text, flags=re.DOTALL)
+    if match:
+        reasoning = match.group(1).strip()
+        clean_text = text[match.end():].strip()
         clean_text = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", clean_text).strip()
         return reasoning, clean_text
 
@@ -262,6 +273,7 @@ def main() -> None:
     sampling_params_no_thinking = {
         "temperature": 0.0,
         "max_new_tokens": 4096,
+        "skip_special_tokens": True,
     }
 
     sampling_params_thinking = {
@@ -269,6 +281,7 @@ def main() -> None:
         "top_p": 0.95,
         "top_k": 64,
         "max_new_tokens": 8192,
+        "skip_special_tokens": False,
     }
 
     # STEP 1: Standard Inference
@@ -303,7 +316,9 @@ def main() -> None:
     wstf_scores = {"input": [], "ground_truth": [], "gemma4": [], "gemma4_thinking": []}
 
     for idx, rec in enumerate(records):
-        out_no_thinking = extract_output_text(no_thinking_outputs[idx])
+        raw_no_thinking = extract_output_text(no_thinking_outputs[idx])
+        out_no_thinking = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", raw_no_thinking).strip()
+
         raw_thinking_output = extract_output_text(thinking_outputs[idx])
         reasoning_trace, out_thinking = extract_gemma4_reasoning(raw_thinking_output)
 
