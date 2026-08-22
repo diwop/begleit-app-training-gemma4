@@ -113,7 +113,7 @@ apptainer exec \
     --num_processes="${NUM_GPUS}" \
     --dynamo_backend=no \
     --mixed_precision=bf16 \
-    -m axolotl.cli.train "${CONFIG_PATH}"
+    /repo/src-train/train_patched.py "${CONFIG_PATH}"
 
 echo "[SUCCESS] Step 1: Adapter fine-tuning completed successfully!"
 

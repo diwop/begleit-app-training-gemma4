@@ -7,6 +7,9 @@ attn_implementation: sdpa
 gemma4_hybrid_attn_impl: false
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
+  # Under DeepSpeed ZeRO-3, parameter sharding frees memory after forward passes, leaving Size([0]) tensors.
+  # use_reentrant: true prevents PyTorch's check_recomputed_tensors_match from throwing CheckpointError in backward.
+  # train_patched.py enforces this at runtime after Axolotl's schema validator.
   use_reentrant: true
 
 # DeepSpeed Memory & Sharding Optimizations
