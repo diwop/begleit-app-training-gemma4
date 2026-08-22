@@ -61,10 +61,8 @@ eot_tokens:
   - "<turn|>"
 
 # Dataset Configuration
-# Initial fast verification uses dataset_train_sample.jsonl (8 samples).
-# Switch path to data/dataset_train.jsonl for full training.
 datasets:
-  - path: data/dataset_train_sample.jsonl
+  - path: data/dataset_train.jsonl
     type: chat_template
     chat_template: tokenizer_default
     field_messages: messages
@@ -80,8 +78,8 @@ pad_to_sequence_len: false
 micro_batch_size: 1
 gradient_accumulation_steps: 2
 
-# Training Schedule (1 epoch for smoke test, switch to 3 epochs for full run)
-num_epochs: 1
+# Training Schedule
+num_epochs: 3
 learning_rate: 0.0002
 lr_scheduler: cosine
 warmup_ratio: 0.05

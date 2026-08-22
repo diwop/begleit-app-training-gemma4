@@ -2,7 +2,7 @@
 #SBATCH --job-name=gemma4-train-fp8
 #SBATCH --partition=small_gpu8
 #SBATCH --gpus=2
-#SBATCH --time=00:45:00
+#SBATCH --time=02:30:00
 #SBATCH --output=logs/train_%j.log
 #SBATCH --error=logs/train_%j-err.log
 
