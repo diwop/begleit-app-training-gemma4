@@ -36,7 +36,7 @@ apptainer exec \
   "${SGLANG_CONTAINER_DIR}" \
   "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor
 
-# 2. Download model snapshots into shared Hugging Face cache
+# 2. Download model snapshots and Hub kernels into shared Hugging Face cache
 echo "[INFO] Downloading Hugging Face model and kernel snapshots..."
 apptainer exec \
   --env HF_HOME="${HF_CACHE_DIR}" \
@@ -52,14 +52,25 @@ models = [
     'google/gemma-4-26b-a4b-it',
     'RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic',
     'intfloat/multilingual-e5-base',
-    'kernels-community/flash-attn2',
 ]
 token = os.environ.get('HF_TOKEN', None)
 
 for model_name in models:
-    print(f'[INFO] Checking/downloading snapshot for {model_name}...')
+    print(f'[INFO] Checking/downloading model snapshot for {model_name}...')
     path = snapshot_download(repo_id=model_name, token=token)
     print(f'[SUCCESS] Snapshot ready at: {path}')
+
+# Pre-download Hub kernel revisions for offline execution
+kernels = [
+    ('kernels-community/flash-attn2', 'v1'),
+    ('kernels-community/flash-attn2', 'v2'),
+    ('kernels-community/flash-attn2', 'v3'),
+    ('kernels-community/flash-attn2', 'main'),
+]
+for kernel_name, rev in kernels:
+    print(f'[INFO] Checking/downloading kernel snapshot for {kernel_name} ({rev})...')
+    path = snapshot_download(repo_id=kernel_name, revision=rev, repo_type='kernel', token=token)
+    print(f'[SUCCESS] Kernel {rev} ready at: {path}')
 "
 
 echo "============================================================"
