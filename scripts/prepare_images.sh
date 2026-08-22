@@ -99,17 +99,17 @@ case "${TARGET}" in
     ;;
   eval)
     build_sandbox "sglang" "${EVAL_IMAGE}"
-    echo "[INFO] Installing 'textstat' and 'sentence-transformers' in SGLang environment on login node..."
+    echo "[INFO] Installing 'textstat', 'sentence-transformers', and 'llmcompressor' in SGLang environment on login node..."
     mkdir -p "${HOME}/.local"
-    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor
     verify_sglang_container
     ;;
   all)
     build_sandbox "axolotl" "${TRAIN_IMAGE}"
     build_sandbox "sglang" "${EVAL_IMAGE}"
-    echo "[INFO] Installing 'textstat' and 'sentence-transformers' in SGLang environment on login node..."
+    echo "[INFO] Installing 'textstat', 'sentence-transformers', and 'llmcompressor' in SGLang environment on login node..."
     mkdir -p "${HOME}/.local"
-    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers
+    apptainer exec --bind "${HOME}/.local:${HOME}/.local" "${OUTPUT_DIR}/sglang_sandbox" /usr/bin/python3 -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor
     verify_sglang_container
     ;;
   verify)

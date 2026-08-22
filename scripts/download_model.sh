@@ -29,11 +29,11 @@ echo "============================================================"
 mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local"
 
 # 1. Ensure textstat and sentence-transformers are installed into user site packages
-echo "[INFO] Installing/verifying 'textstat' and 'sentence-transformers' in SGLang environment..."
+echo "[INFO] Installing/verifying 'textstat', 'sentence-transformers', and 'llmcompressor' in SGLang environment..."
 apptainer exec \
   --bind "${HOME}/.local:${HOME}/.local" \
   "${SGLANG_CONTAINER_DIR}" \
-  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers
+  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor
 
 # 2. Download model snapshots into shared Hugging Face cache
 echo "[INFO] Downloading Hugging Face model snapshots..."

@@ -25,7 +25,7 @@ TRAIN_SAMPLE_OUTPUT = Path("data/dataset_train_sample.jsonl")
 EVAL_OUTPUT = Path("data/dataset_eval.jsonl")
 EVAL_RATIO = 0.10
 SEED = 42
-SAMPLE_SIZE = 10
+SAMPLE_SIZE = 8
 
 
 def get_tokenizer():

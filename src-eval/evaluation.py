@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Runs baseline and dynamic few-shot evaluation for RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic on data/dataset_eval.jsonl using SGLang.
-Evaluates the model across three techniques:
-1. Standard zero-shot generation (without thinking: enable_thinking=False)
-2. Thinking-enabled generation (with thinking: enable_thinking=True, T=1.0, top_p=0.95, top_k=64)
-3. Dynamic Few-Shot generation (2 semantically closest training examples retrieved via multilingual-e5-base)
+Runs baseline, dynamic few-shot, and fine-tuned merged adapter evaluation for Gemma 4 26B-A4B on data/dataset_eval.jsonl using SGLang.
+Evaluates the model across five techniques:
+1. Standard zero-shot generation on base model (without thinking: enable_thinking=False)
+2. Thinking-enabled generation on base model (with thinking: enable_thinking=True, T=1.0, top_p=0.95, top_k=64)
+3. Dynamic Few-Shot generation on base model (2 semantically closest training examples retrieved via multilingual-e5-base)
+4. Fine-Tuned Merged Adapter generation WITHOUT thinking (enable_thinking=False)
+5. Fine-Tuned Merged Adapter generation WITH thinking (enable_thinking=True, T=1.0, top_p=0.95, top_k=64)
 
 Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts.
 """
 
 from __future__ import annotations
 
+import gc
 import os
 import json
 from pathlib import Path
@@ -56,10 +59,11 @@ MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
 
-MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
+BASE_MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
+MERGED_MODEL_PATH = Path(os.environ.get("MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8"))
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 TRAIN_DATA_PATH = Path("data/dataset_train.jsonl")
-RESULTS_OUTPUT_PATH = Path("data/results.jsonl")
+RESULTS_OUTPUT_PATH = Path(os.environ.get("EVAL_RESULTS_OUTPUT", "data/results.jsonl"))
 
 
 def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
@@ -202,9 +206,10 @@ def main() -> None:
     overall_start_time = time.time()
 
     print("=" * 60)
-    print("      Gemma 4 Baseline & Few-Shot Evaluation (SGLang)")
+    print("      Gemma 4 Evaluation (Baseline, Few-Shot & Merged Adapter)")
     print("=" * 60)
-    print(f"[INFO] Model            : {MODEL_NAME}")
+    print(f"[INFO] Base Model       : {BASE_MODEL_NAME}")
+    print(f"[INFO] Merged Model Path: {MERGED_MODEL_PATH}")
     print(f"[INFO] Input Dataset    : {EVAL_DATA_PATH}")
     print(f"[INFO] Output Results   : {RESULTS_OUTPUT_PATH}")
 
@@ -225,7 +230,7 @@ def main() -> None:
         print(f"[INFO] Loaded {len(records)} total evaluation samples (including {len(integrity_records)} integrity checks).")
 
     # 1. Resolve local offline model snapshot path & Tokenizer
-    model_path = get_model_snapshot_path(MODEL_NAME)
+    model_path = get_model_snapshot_path(BASE_MODEL_NAME)
     print(f"\n[INFO] Loading tokenizer from snapshot: {model_path}")
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
@@ -324,7 +329,7 @@ def main() -> None:
 
     # STEP 1: Zero-Shot WITHOUT thinking
     print("=" * 60)
-    print(f"[STEP 1/3] Running Zero-Shot WITHOUT thinking (enable_thinking=False) for {len(records)} samples...")
+    print(f"[STEP 1/4] Running Zero-Shot WITHOUT thinking on Base Model for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step1_start = time.time()
 
@@ -335,7 +340,7 @@ def main() -> None:
 
     # STEP 2: Zero-Shot WITH thinking
     print("=" * 60)
-    print(f"[STEP 2/3] Running Zero-Shot WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
+    print(f"[STEP 2/4] Running Zero-Shot WITH thinking on Base Model for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step2_start = time.time()
 
@@ -346,7 +351,7 @@ def main() -> None:
 
     # STEP 3: Dynamic Few-Shot WITH thinking (2 semantically closest demonstrations)
     print("=" * 60)
-    print(f"[STEP 3/3] Running Dynamic Few-Shot WITH thinking (enable_thinking=True, 2 retrieved examples) for {len(records)} samples...")
+    print(f"[STEP 3/4] Running Dynamic Few-Shot WITH thinking on Base Model for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step3_start = time.time()
 
@@ -354,6 +359,54 @@ def main() -> None:
 
     step3_elapsed = time.time() - step3_start
     print(f"[SUCCESS] Step 3 completed in {step3_elapsed:.1f}s ({step3_elapsed/len(records):.2f}s/sample)\n")
+
+    # STEP 4 & 5: Fine-Tuned Merged Adapter Evaluation
+    merged_outputs = None
+    merged_thinking_outputs = None
+    if MERGED_MODEL_PATH.exists():
+        # Release base engine GPU memory before loading merged model
+        engine.shutdown()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+
+        print(f"\n[INFO] Initializing SGLang engine with Fine-Tuned Merged Model from: {MERGED_MODEL_PATH}")
+        merged_engine = sgl.Engine(
+            model_path=str(MERGED_MODEL_PATH),
+            tp_size=tensor_parallel_size,
+            trust_remote_code=True,
+            mem_fraction_static=0.85,
+            context_length=MAX_SEQUENCE_LENGTH,
+        )
+
+        # STEP 4: Merged Model WITHOUT thinking
+        print("=" * 60)
+        print(f"[STEP 4/5] Running Fine-Tuned Merged Model WITHOUT thinking for {len(records)} samples...")
+        print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        step4_start = time.time()
+
+        merged_outputs = merged_engine.generate(prompts_no_thinking, sampling_params_no_thinking)
+
+        step4_elapsed = time.time() - step4_start
+        print(f"[SUCCESS] Step 4 completed in {step4_elapsed:.1f}s ({step4_elapsed/len(records):.2f}s/sample)\n")
+
+        # STEP 5: Merged Model WITH thinking
+        print("=" * 60)
+        print(f"[STEP 5/5] Running Fine-Tuned Merged Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
+        print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        step5_start = time.time()
+
+        merged_thinking_outputs = merged_engine.generate(prompts_thinking, sampling_params_thinking)
+
+        step5_elapsed = time.time() - step5_start
+        print(f"[SUCCESS] Step 5 completed in {step5_elapsed:.1f}s ({step5_elapsed/len(records):.2f}s/sample)\n")
+
+        merged_engine.shutdown()
+    else:
+        print("=" * 60)
+        print(f"[INFO] [STEP 4/5 & 5/5] Fine-tuned merged model not found at '{MERGED_MODEL_PATH}'.")
+        print("[INFO] Skipping Passes 4 & 5 (run scripts/merge_and_quantize.sh first to produce merged FP8 model).\n")
+        engine.shutdown()
 
     # 5. Calculate metrics and assemble results
     print("=" * 60)
@@ -367,6 +420,8 @@ def main() -> None:
         "gemma4": [],
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
+        "gemma4_merged": [],
+        "gemma4_merged_thinking": [],
     }
     wstf_scores = {
         "input": [],
@@ -374,6 +429,8 @@ def main() -> None:
         "gemma4": [],
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
+        "gemma4_merged": [],
+        "gemma4_merged_thinking": [],
     }
 
     for idx, rec in enumerate(records):
@@ -396,18 +453,44 @@ def main() -> None:
         gemma4_thinking_metrics = get_raw_metrics(out_thinking)
         gemma4_few_shots_metrics = get_raw_metrics(out_few_shots)
 
+        out_merged = None
+        merged_reasoning = None
+        gemma4_merged_metrics = None
+
+        if merged_outputs is not None:
+            raw_merged = extract_output_text(merged_outputs[idx])
+            merged_reasoning, out_merged = extract_gemma4_reasoning(raw_merged)
+            gemma4_merged_metrics = get_raw_metrics(out_merged)
+
+        out_merged_thinking = None
+        merged_thinking_reasoning = None
+        gemma4_merged_thinking_metrics = None
+
+        if merged_thinking_outputs is not None:
+            raw_merged_thinking = extract_output_text(merged_thinking_outputs[idx])
+            merged_thinking_reasoning, out_merged_thinking = extract_gemma4_reasoning(raw_merged_thinking)
+            gemma4_merged_thinking_metrics = get_raw_metrics(out_merged_thinking)
+
         if assistant_metrics is not None:
             fre_scores["input"].append(user_metrics["fre"])
             fre_scores["ground_truth"].append(assistant_metrics["fre"])
             fre_scores["gemma4"].append(gemma4_metrics["fre"])
             fre_scores["gemma4_thinking"].append(gemma4_thinking_metrics["fre"])
             fre_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["fre"])
+            if gemma4_merged_metrics is not None:
+                fre_scores["gemma4_merged"].append(gemma4_merged_metrics["fre"])
+            if gemma4_merged_thinking_metrics is not None:
+                fre_scores["gemma4_merged_thinking"].append(gemma4_merged_thinking_metrics["fre"])
 
             wstf_scores["input"].append(user_metrics["wstf"])
             wstf_scores["ground_truth"].append(assistant_metrics["wstf"])
             wstf_scores["gemma4"].append(gemma4_metrics["wstf"])
             wstf_scores["gemma4_thinking"].append(gemma4_thinking_metrics["wstf"])
             wstf_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["wstf"])
+            if gemma4_merged_metrics is not None:
+                wstf_scores["gemma4_merged"].append(gemma4_merged_metrics["wstf"])
+            if gemma4_merged_thinking_metrics is not None:
+                wstf_scores["gemma4_merged_thinking"].append(gemma4_merged_thinking_metrics["wstf"])
 
         result_entry = {
             "id": rec["id"],
@@ -426,6 +509,12 @@ def main() -> None:
             "assistant_gemma4_dynamic_few_shots_reasoning": few_shots_reasoning,
             "assistant_gemma4_dynamic_few_shots": out_few_shots,
             "assistant_gemma4_dynamic_few_shots_metrics": gemma4_few_shots_metrics,
+            "assistant_gemma4_merged_reasoning": merged_reasoning,
+            "assistant_gemma4_merged": out_merged,
+            "assistant_gemma4_merged_metrics": gemma4_merged_metrics,
+            "assistant_gemma4_merged_thinking_reasoning": merged_thinking_reasoning,
+            "assistant_gemma4_merged_thinking": out_merged_thinking,
+            "assistant_gemma4_merged_thinking_metrics": gemma4_merged_thinking_metrics,
         }
         results.append(result_entry)
 
@@ -458,6 +547,17 @@ def main() -> None:
         print(f"  * Gemma 4 (Zero-Shot)           : FRE = {avg_g4_fre:.1f}  |  WSTF = {avg_g4_wstf:.1f}")
         print(f"  * Gemma 4 (With Thinking)       : FRE = {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}")
         print(f"  * Gemma 4 (Few-Shots + Thinking): FRE = {avg_g4_few_fre:.1f}  |  WSTF = {avg_g4_few_wstf:.1f}")
+
+        if fre_scores["gemma4_merged"]:
+            avg_g4_merged_fre = sum(fre_scores["gemma4_merged"]) / len(fre_scores["gemma4_merged"])
+            avg_g4_merged_wstf = sum(wstf_scores["gemma4_merged"]) / len(wstf_scores["gemma4_merged"])
+            print(f"  * Gemma 4 (Fine-Tuned Merged)   : FRE = {avg_g4_merged_fre:.1f}  |  WSTF = {avg_g4_merged_wstf:.1f}")
+
+        if fre_scores["gemma4_merged_thinking"]:
+            avg_g4_merged_think_fre = sum(fre_scores["gemma4_merged_thinking"]) / len(fre_scores["gemma4_merged_thinking"])
+            avg_g4_merged_think_wstf = sum(wstf_scores["gemma4_merged_thinking"]) / len(wstf_scores["gemma4_merged_thinking"])
+            print(f"  * Gemma 4 (Merged + Thinking)   : FRE = {avg_g4_merged_think_fre:.1f}  |  WSTF = {avg_g4_merged_think_wstf:.1f}")
+
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
 
