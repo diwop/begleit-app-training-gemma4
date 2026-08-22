@@ -122,7 +122,7 @@ def get_model_snapshot_path(model_name: str) -> str:
 
     if not snapshots_dir.exists():
         print(f"[ERROR] Hugging Face cache directory not found at: {snapshots_dir}", file=sys.stderr)
-        print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
+        print("[INFO] Please run 'bash scripts/download_model.sh' on the login node first.", file=sys.stderr)
         sys.exit(1)
 
     snapshots = sorted(
@@ -132,7 +132,7 @@ def get_model_snapshot_path(model_name: str) -> str:
     )
     if not snapshots:
         print(f"[ERROR] No snapshot directories found inside: {snapshots_dir}", file=sys.stderr)
-        print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
+        print("[INFO] Please run 'bash scripts/download_model.sh' on the login node first.", file=sys.stderr)
         sys.exit(1)
 
     resolved_path = str(snapshots[0])
