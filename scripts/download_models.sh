@@ -8,12 +8,11 @@ SGLANG_CONTAINER_DIR="${WORKSPACE_ROOT}/images/sglang_sandbox"
 CONTAINER_PYTHON="/usr/bin/python3"
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
 
-# Models and Hub kernel dependencies required for training, evaluation, and dynamic few-shot retrieval
+# Models required for training, evaluation, and dynamic few-shot retrieval
 MODELS=(
   "google/gemma-4-26b-a4b-it"
   "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
   "intfloat/multilingual-e5-base"
-  "kernels-community/flash-attn2"
 )
 
 echo "============================================================"
@@ -32,19 +31,19 @@ echo "[INFO] Installing/verifying 'textstat', 'sentence-transformers', and 'llmc
 apptainer exec \
   --bind "${HOME}/.local:${HOME}/.local" \
   "${SGLANG_CONTAINER_DIR}" \
-  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor
+  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor loguru
 
 AXOLOTL_CONTAINER_DIR="${WORKSPACE_ROOT}/images/axolotl_sandbox"
 if [ -d "${AXOLOTL_CONTAINER_DIR}" ]; then
-  echo "[INFO] Installing 'llmcompressor' into Axolotl virtual environment..."
+  echo "[INFO] Verifying Axolotl environment user-site access..."
   apptainer exec \
     --bind "${HOME}/.local:${HOME}/.local" \
     "${AXOLOTL_CONTAINER_DIR}" \
-    /workspace/axolotl-venv/bin/pip install --no-cache-dir llmcompressor || true
+    /workspace/axolotl-venv/bin/python -c "import sys; sys.path.insert(0, '${HOME}/.local/lib/python3.12/site-packages'); import llmcompressor; print('[INFO] llmcompressor ready in Axolotl sandbox:', llmcompressor.__version__)" || true
 fi
 
-# 2. Download model snapshots and Hub kernels into shared Hugging Face cache
-echo "[INFO] Downloading Hugging Face model and kernel snapshots..."
+# 2. Download model snapshots into shared Hugging Face cache
+echo "[INFO] Downloading Hugging Face model snapshots..."
 apptainer exec \
   --env HF_HOME="${HF_CACHE_DIR}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
@@ -66,18 +65,6 @@ for model_name in models:
     print(f'[INFO] Checking/downloading model snapshot for {model_name}...')
     path = snapshot_download(repo_id=model_name, token=token)
     print(f'[SUCCESS] Snapshot ready at: {path}')
-
-# Pre-download Hub kernel revisions for offline execution
-kernels = [
-    ('kernels-community/flash-attn2', 'v1'),
-    ('kernels-community/flash-attn2', 'v2'),
-    ('kernels-community/flash-attn2', 'v3'),
-    ('kernels-community/flash-attn2', 'main'),
-]
-for kernel_name, rev in kernels:
-    print(f'[INFO] Checking/downloading kernel snapshot for {kernel_name} ({rev})...')
-    path = snapshot_download(repo_id=kernel_name, revision=rev, repo_type='kernel', token=token)
-    print(f'[SUCCESS] Kernel {rev} ready at: {path}')
 "
 
 echo "============================================================"

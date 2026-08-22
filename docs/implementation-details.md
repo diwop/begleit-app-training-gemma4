@@ -113,7 +113,7 @@ The smoke test verifies that:
   PEFT           : 0.20.0
   Accelerate     : 1.13.0
   BitsAndBytes   : 0.50.0
-  Flash-Attn     : Not Installed
+  LLMCompressor  : 0.13.0
   Triton         : 3.7.0
   SGLang         : Not Installed
 
