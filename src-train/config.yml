@@ -2,8 +2,9 @@ base_model: google/gemma-4-26b-a4b-it
 model_type: AutoModelForCausalLM
 tokenizer_type: AutoTokenizer
 
-# Gemma 4 Architecture & Attention Optimization
-gemma4_hybrid_attn_impl: true
+# Gemma 4 Architecture & Attention Optimization (Native PyTorch SDPA)
+attn_implementation: sdpa
+gemma4_hybrid_attn_impl: false
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: true
@@ -31,7 +32,7 @@ lora_r: 32
 lora_alpha: 64
 lora_dropout: 0.05
 
-# Disable experimental LoRA Triton kernel rewrites to prevent indexing conflicts on Gemma 4 fused attention
+# Disable experimental LoRA Triton kernel rewrites
 lora_qkv_kernel: false
 lora_o_kernel: false
 lora_mlp_kernel: false
@@ -70,8 +71,8 @@ datasets:
 
 # Sequence and Batch Dimensions
 sequence_len: 8192
-sample_packing: true
-pad_to_sequence_len: true
+sample_packing: false
+pad_to_sequence_len: false
 
 micro_batch_size: 1
 gradient_accumulation_steps: 2
