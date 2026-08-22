@@ -105,6 +105,7 @@ apptainer exec \
   --pwd /repo \
   "${AXOLOTL_CONTAINER_DIR}" \
   /workspace/axolotl-venv/bin/accelerate launch \
+    --multi_gpu \
     --num_machines=1 \
     --num_processes="${NUM_GPUS}" \
     --dynamo_backend=no \

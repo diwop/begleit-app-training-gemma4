@@ -4,9 +4,11 @@ tokenizer_type: AutoTokenizer
 
 # Gemma 4 Architecture & Attention Optimization
 gemma4_hybrid_attn_impl: true
+flash_attention: false
+sdpa: true
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
-  use_reentrant: true
+  use_reentrant: false
 
 # Fully qualified: bare suffixes like gate_proj also match the vision tower, whose
 # Gemma4ClippableLinear wrappers break both PEFT merge_lora and SGLang's / vLLM's adapter loader.
