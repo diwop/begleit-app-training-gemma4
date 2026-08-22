@@ -70,8 +70,8 @@ datasets:
 
 # Sequence and Batch Dimensions
 sequence_len: 8192
-sample_packing: false
-pad_to_sequence_len: false
+sample_packing: true
+pad_to_sequence_len: true
 
 micro_batch_size: 1
 gradient_accumulation_steps: 2
