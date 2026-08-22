@@ -3,7 +3,7 @@
 Merges a trained LoRA adapter into the base bfloat16 Gemma 4 model and compresses
 the resulting merged checkpoint to FP8-Dynamic using llmcompressor.
 
-The exported FP8 model can be loaded natively and efficiently by vLLM or SGLang for inference.
+The exported FP8 model can be loaded natively and efficiently by SGLang or vLLM for inference.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import gc
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import time
 import torch
@@ -21,6 +22,8 @@ import torch
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+os.environ["DO_NOT_TRACK"] = "1"
+os.environ["AXOLOTL_DO_NOT_TRACK"] = "1"
 
 
 def get_model_snapshot_path(model_name: str) -> str:
@@ -51,9 +54,80 @@ def get_model_snapshot_path(model_name: str) -> str:
     return resolved_path
 
 
+def merge_via_axolotl(config_path: str, adapter_dir: str, output_dir: str) -> bool:
+    """Try merging using Axolotl's native CLI merge_lora for Gemma 4."""
+    print(f"[INFO] Attempting merge via Axolotl CLI (axolotl.cli.merge_lora)...")
+    env = os.environ.copy()
+    env.setdefault("MASTER_ADDR", "localhost")
+    env.setdefault("MASTER_PORT", "12345")
+    env.setdefault("WORLD_SIZE", "1")
+    env.setdefault("RANK", "0")
+    env.setdefault("LOCAL_RANK", "0")
+
+    cmd = [
+        sys.executable, "-m", "axolotl.cli.merge_lora",
+        config_path,
+        f"--lora_model_dir={adapter_dir}",
+        f"--output_dir={output_dir}",
+    ]
+    try:
+        subprocess.run(cmd, check=True, env=env)
+        # Check if output or nested merged/ has config.json
+        nested = Path(output_dir) / "merged"
+        if nested.exists() and (nested / "config.json").exists():
+            for item in nested.iterdir():
+                shutil.move(str(item), str(output_dir))
+            shutil.rmtree(str(nested), ignore_errors=True)
+        if (Path(output_dir) / "config.json").exists():
+            print(f"[SUCCESS] Axolotl merge succeeded at: {output_dir}")
+            return True
+    except Exception as e:
+        print(f"[WARNING] Axolotl merge failed or unavailable: {e}. Falling back to PEFT merge.", file=sys.stderr)
+    return False
+
+
+def merge_via_peft(base_model_snapshot: str, adapter_path: Path, merged_bf16_path: Path) -> None:
+    """Fallback merge using transformers and PEFT merge_and_unload."""
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from peft import PeftModel
+
+    print("\n[STEP 1/3] Loading base model in bfloat16 via Transformers...")
+    t0 = time.time()
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_snapshot,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        trust_remote_code=True,
+        local_files_only=True,
+    )
+    print(f"[INFO] Base model loaded in {time.time() - t0:.1f}s")
+
+    print("[STEP 1/3] Loading and merging LoRA adapter weights...")
+    t1 = time.time()
+    peft_model = PeftModel.from_pretrained(model, str(adapter_path))
+    merged_model = peft_model.merge_and_unload()
+    print(f"[INFO] Adapter merged in {time.time() - t1:.1f}s")
+
+    print(f"[STEP 1/3] Saving merged bfloat16 checkpoint to: {merged_bf16_path}")
+    merged_model.save_pretrained(str(merged_bf16_path))
+    tokenizer = AutoTokenizer.from_pretrained(base_model_snapshot, trust_remote_code=True, local_files_only=True)
+    tokenizer.save_pretrained(str(merged_bf16_path))
+
+    del peft_model, model, merged_model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Merge LoRA adapter into Gemma 4 base model and compress to FP8"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="src-train/config.yml",
+        help="Path to training config.yml",
     )
     parser.add_argument(
         "--base-model",
@@ -115,55 +189,21 @@ def main() -> None:
     print(f"[INFO] Output FP8 Path  : {output_fp8_path}")
     print("=" * 60)
 
-    # Import required libraries
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        from peft import PeftModel
-    except ImportError as e:
-        print(f"[ERROR] Required ML package missing: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        from llmcompressor.modifiers.quantization import QuantizationModifier
-        from llmcompressor.transformers import SparseMLForCausalLM
-    except ImportError:
-        print("[ERROR] 'llmcompressor' is not installed in the environment.", file=sys.stderr)
-        print("[INFO] Run 'pip install --user llmcompressor' on login node first.", file=sys.stderr)
-        sys.exit(1)
-
-    # Resolve local snapshot path for base model
+    # Step 1: Perform BF16 Merge (Axolotl primary -> PEFT fallback)
     base_model_snapshot = get_model_snapshot_path(args.base_model)
-
-    # Step 1: Load base model and LoRA adapter, then merge
-    print("\n[STEP 1/3] Loading base model in bfloat16...")
-    t0 = time.time()
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model_snapshot,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        trust_remote_code=True,
-        local_files_only=True,
-    )
-    print(f"[INFO] Base model loaded in {time.time() - t0:.1f}s")
-
-    print("[STEP 1/3] Loading and merging LoRA adapter weights...")
-    t1 = time.time()
-    peft_model = PeftModel.from_pretrained(model, str(adapter_path))
-    merged_model = peft_model.merge_and_unload()
-    print(f"[INFO] Adapter merged in {time.time() - t1:.1f}s")
-
-    print(f"[STEP 1/3] Saving merged bfloat16 checkpoint to: {merged_bf16_path}")
-    merged_model.save_pretrained(str(merged_bf16_path))
-    tokenizer = AutoTokenizer.from_pretrained(base_model_snapshot, trust_remote_code=True, local_files_only=True)
-    tokenizer.save_pretrained(str(merged_bf16_path))
-
-    # Free memory before running compression
-    del peft_model, model, merged_model
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    merged_ok = merge_via_axolotl(args.config, str(adapter_path), str(merged_bf16_path))
+    if not merged_ok:
+        merge_via_peft(base_model_snapshot, adapter_path, merged_bf16_path)
 
     # Step 2: Quantize merged model into FP8-Dynamic
+    try:
+        from transformers import AutoTokenizer
+        from llmcompressor.modifiers.quantization import QuantizationModifier
+        from llmcompressor.transformers import SparseMLForCausalLM
+    except ImportError as e:
+        print(f"[ERROR] Required package for FP8 compression missing: {e}", file=sys.stderr)
+        sys.exit(1)
+
     print("\n[STEP 2/3] Compressing merged model to FP8-Dynamic with llmcompressor...")
     t2 = time.time()
     recipe = QuantizationModifier(targets="Linear", scheme="FP8_DYNAMIC")
@@ -172,7 +212,7 @@ def main() -> None:
         recipe=recipe,
         output_dir=str(output_fp8_path),
     )
-    # Ensure tokenizer and special configs are also present in the final output directory
+    tokenizer = AutoTokenizer.from_pretrained(str(merged_bf16_path), trust_remote_code=True, local_files_only=True)
     tokenizer.save_pretrained(str(output_fp8_path))
     print(f"[SUCCESS] FP8 compression completed in {time.time() - t2:.1f}s")
 

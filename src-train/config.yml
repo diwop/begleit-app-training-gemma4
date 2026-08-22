@@ -3,31 +3,17 @@ model_type: AutoModelForCausalLM
 tokenizer_type: AutoTokenizer
 
 # Gemma 4 Architecture & Attention Optimization
-attn_implementation: sdpa
 gemma4_hybrid_attn_impl: true
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
-  use_reentrant: false
+  use_reentrant: true
 
-# Fully qualified: bare suffixes like gate_proj also match the vision tower, whose
-# Gemma4ClippableLinear wrappers break both PEFT merge_lora and SGLang's / vLLM's adapter loader.
-lora_target_modules: 'model\.language_model\.layers\.[\d]+\.(_checkpoint_wrapped_module\.)?(mlp|self_attn)\.(up|down|gate|q|k|v|o)_proj'
-
-# Set to standard lora since the base model is unquantized bfloat16
-adapter: lora
-lora_r: 32
-lora_alpha: 64
-lora_dropout: 0.05
-
-# Precision architecture tailored for modern compute architectures (L40S / Hopper / Ada)
-bf16: true
-fp16: false
-tf32: true
-
-unsloth: false
-load_in_8bit: false # Disabled: Fits natively sharded under ZeRO-3
-load_in_4bit: false
-qlora_sharded_model_loading: false
+# DeepSpeed Memory & Sharding Optimizations
+deepspeed: src-train/deepspeed_zero3.json
+deepspeed_cpu_checkpointing: true
+deepspeed_param_persistence_threshold: 0
+deepspeed_offload_param: true
+deepspeed_offload_optimizer: true
 
 # Liger Kernel Acceleration
 plugins:
@@ -39,11 +25,26 @@ liger_glu_activation: true
 liger_layer_norm: true
 liger_fused_linear_cross_entropy: true
 
-# Turn boundaries. NOT '<end_of_turn>' -- that is the Gemma 3 spelling and does not exist
-# in Gemma 4, where it tokenizes as 7 pieces of ordinary text. Gemma 4 ends a turn with
-# '<turn|>' (id 106), which is also the second entry in the model's own
-# eos_token_id: [1, 106]. Naming a token that is not in the chat template means Axolotl
-# never trains the terminator, so the adapter may not learn to stop.
+# Set to standard lora since the base model is unquantized bfloat16
+adapter: lora
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+
+# Fully qualified: targets language model layers only, avoiding vision tower (Gemma4ClippableLinear) and routers
+lora_target_modules: 'model\.language_model\.layers\.[\d]+\.(_checkpoint_wrapped_module\.)?(mlp|self_attn)\.(up|down|gate|q|k|v|o)_proj'
+
+# Precision architecture tailored for modern compute architectures (L40S / Hopper / Ada)
+bf16: true
+fp16: false
+tf32: true
+
+unsloth: false
+load_in_8bit: false # Disabled: Fits natively sharded under ZeRO-3
+load_in_4bit: false
+qlora_sharded_model_loading: false
+
+# Turn boundaries. Gemma 4 ends a turn with '<turn|>' (id 106)
 special_tokens:
   eos_token: "<eos>"
 eot_tokens:
@@ -76,14 +77,8 @@ lr_scheduler: cosine
 warmup_ratio: 0.05
 weight_decay: 0.01
 
-# DeepSpeed Memory & Sharding Optimizations
-deepspeed: src-train/deepspeed_zero3.json
-deepspeed_cpu_checkpointing: true
-deepspeed_param_persistence_threshold: 0
-deepspeed_offload_param: true
-deepspeed_offload_optimizer: true
-
 # Output and Logging
 logging_steps: 1
+save_safetensors: true
 save_strategy: "epoch"
 output_dir: ./local/adapters/gemma-4-26b-a4b-it-lora

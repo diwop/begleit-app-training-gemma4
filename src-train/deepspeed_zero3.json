@@ -23,7 +23,12 @@
     "stage3_param_persistence_threshold": 0,
     "stage3_max_live_parameters": 1000000000,
     "stage3_max_reuse_distance": 1000000000,
-    "stage3_gather_16bit_weights_on_model_save": true
+    "stage3_gather_16bit_weights_on_model_save": false
+  },
+  "activation_checkpointing": {
+    "partition_activations": true,
+    "contiguous_memory_optimization": true,
+    "cpu_checkpointing": true
   },
   "gradient_accumulation_steps": "auto",
   "gradient_clipping": "auto",
