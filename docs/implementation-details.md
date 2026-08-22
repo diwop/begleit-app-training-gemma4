@@ -396,7 +396,7 @@ Fine-tunes a LoRA adapter on `google/gemma-4-26b-a4b-it` using **Axolotl** with 
    - When running under Slurm, `scripts/run_training.sh` automatically routes high-IOPS temporary caches (`TMPDIR`, `TRITON_CACHE_DIR`, `TORCH_EXTENSIONS_DIR`) to the node's local NVMe SSD (`$SLURM_TMPDIR`), preventing network storage bottlenecks while saving the final adapter to `local/adapters/`.
 
 4. **Fast Initial Smoke Verification vs. Full Run**:
-   - Initial verification uses `data/dataset_train_sample.jsonl` (first 8 samples) and `num_epochs: 1` (`#SBATCH --time=00:30:00`).
+   - Initial verification uses `data/dataset_train_sample.jsonl` (first 8 samples) and `num_epochs: 1` (`#SBATCH --time=00:45:00`).
    - For full training, switch `datasets.path` in `src-train/config.yml` to `data/dataset_train.jsonl` and set `num_epochs: 3`.
 
 ### Pre-download Training & Evaluation Models
@@ -406,11 +406,15 @@ On the **login node** (`hsuper-login01`):
 bash scripts/download_model.sh
 ```
 
-### Run Fine-Tuning on GPU Compute Node
+### Run Combined Fine-Tuning, Merge & FP8 Quantization on GPU Node
+
+The runner script `scripts/run_training.sh` automatically performs the end-to-end pipeline:
+1. Distributed Axolotl LoRA fine-tuning across 2+ GPUs -> saves adapter to `local/adapters/gemma-4-26b-a4b-it-lora`.
+2. Merges LoRA into base model and compresses to **FP8-Dynamic** via `llmcompressor` (`src-train/merge_and_quantize.py`) -> saves production model to `local/models/gemma-4-26b-a4b-it-fp8`.
 
 #### Option 1: Interactive Node (`salloc`)
 ```bash
-salloc --partition=small_gpu8 --gpus 2 --time=00:30:00
+salloc --partition=small_gpu8 --gpus 2 --time=00:45:00
 ssh <assigned-gpu-node>
 cd $HOME/begleit-app-training-gemma4-adapter-tuning
 bash scripts/run_training.sh
@@ -423,37 +427,18 @@ sbatch scripts/submit_training.sbatch
 
 ---
 
-## 5. Adapter Merge & FP8 Quantization (`src-train/merge_and_quantize.py`)
+## 5. 5-Pass SGLang Evaluation (`src-eval/evaluation.py`)
 
-Because running fine-tuned MoE LoRA adapters dynamically on-the-fly with SGLang/vLLM can encounter architectural limitations with heterogeneous layers, the adapter is merged into the base `google/gemma-4-26b-a4b-it` model and compressed directly to **FP8-Dynamic** using `llmcompressor`.
-
-### Pipeline Workflow
-
-1. **Merge LoRA into Base Model**:
-   Loads the unquantized base model (`torch.bfloat16`) and trained LoRA adapter (`local/adapters/gemma-4-26b-a4b-it-lora`), calls `peft_model.merge_and_unload()`, and saves the intermediate merged BF16 checkpoint.
-2. **Compress to FP8-Dynamic**:
-   Applies `llmcompressor` (`QuantizationModifier(targets="Linear", scheme="FP8_DYNAMIC")`) to produce the final production model at `local/models/gemma-4-26b-a4b-it-fp8`.
-3. **Clean Intermediate Weights**:
-   Automatically deletes the large intermediate BF16 weights after FP8 compression to preserve disk space.
-
-### Run Merge & Quantization on GPU Node
-
-#### Option 1: Interactive Node (`salloc`)
+Run the 5-pass evaluation on the evaluation split using SGLang:
 ```bash
-salloc --partition=small_gpu8 --gpus 1 --time=00:30:00
-ssh <assigned-gpu-node>
-cd $HOME/begleit-app-training-gemma4-adapter-tuning
-bash scripts/merge_and_quantize.sh
+sbatch scripts/submit_evaluation.sbatch
+# Or interactively:
+# bash scripts/run_evaluation.sh
 ```
 
-#### Option 2: Queue with Slurm (`sbatch`)
-```bash
-sbatch scripts/submit_merge_and_quantize.sbatch
-```
-
-### Evaluating Fine-Tuned FP8 Model with SGLang
-
-To evaluate the fine-tuned FP8 model on the evaluation split using SGLang:
-```bash
-EVAL_MODEL="local/models/gemma-4-26b-a4b-it-fp8" bash scripts/run_evaluation.sh
-```
+The script evaluates:
+1. Base Model Zero-Shot (`enable_thinking=False`)
+2. Base Model Zero-Shot WITH Thinking (`enable_thinking=True`)
+3. Base Model Dynamic Few-Shot WITH Thinking
+4. Fine-Tuned Merged FP8 Model WITHOUT Thinking (`enable_thinking=False`)
+5. Fine-Tuned Merged FP8 Model WITH Thinking (`enable_thinking=True`)

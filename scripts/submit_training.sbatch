@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=gemma4-train
+#SBATCH --job-name=gemma4-train-fp8
 #SBATCH --partition=small_gpu8
 #SBATCH --gpus=2
-#SBATCH --time=00:30:00
+#SBATCH --time=00:45:00
 #SBATCH --output=logs/train_%j.log
 #SBATCH --error=logs/train_%j-err.log
 
@@ -21,5 +21,5 @@ echo "Partition    : ${SLURM_JOB_PARTITION:-N/A}"
 echo "Submit Dir   : ${SLURM_SUBMIT_DIR:-$PWD}"
 echo "========================="
 
-# Execute multi-GPU Axolotl training helper script
+# Execute combined training, merge, and FP8 quantization pipeline
 bash scripts/run_training.sh

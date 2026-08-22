@@ -9,7 +9,8 @@ HF_CACHE_DIR="${HOME}/.cache/huggingface"
 CONFIG_PATH="/repo/src-train/config.yml"
 
 echo "============================================================"
-echo " Starting Gemma 4 26B-A4B Adapter Fine-Tuning (Axolotl)"
+echo " Starting Gemma 4 26B-A4B End-to-End Pipeline"
+echo " (1. LoRA Fine-Tuning  ->  2. Merge & FP8 Quantization)"
 echo "============================================================"
 echo "[INFO] Workspace       : ${WORKSPACE_ROOT}"
 echo "[INFO] Container       : ${AXOLOTL_CONTAINER_DIR}"
@@ -58,10 +59,16 @@ if [ "${NUM_GPUS}" -lt 2 ]; then
   exit 1
 fi
 
-mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local" "${WORKSPACE_ROOT}/local/adapters" "${WORKSPACE_ROOT}/logs"
+mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local" "${WORKSPACE_ROOT}/local/adapters" "${WORKSPACE_ROOT}/local/models" "${WORKSPACE_ROOT}/logs"
 
-# Execute Axolotl training using accelerate launch inside the Apptainer container
-echo "[INFO] Launching accelerate distributed training across ${NUM_GPUS} GPUs..."
+# ------------------------------------------------------------------------------
+# STEP 1: Axolotl LoRA Fine-Tuning
+# ------------------------------------------------------------------------------
+echo ""
+echo "============================================================"
+echo " [STEP 1/2] Launching Axolotl Distributed LoRA Training"
+echo "============================================================"
+echo "[INFO] Running accelerate across ${NUM_GPUS} GPUs..."
 apptainer exec \
   --nv \
   --env HF_HOME="${HF_CACHE_DIR}" \
@@ -83,6 +90,32 @@ apptainer exec \
     --mixed_precision=bf16 \
     -m axolotl.cli.train "${CONFIG_PATH}"
 
+echo "[SUCCESS] Step 1: Adapter fine-tuning completed successfully!"
+
+# ------------------------------------------------------------------------------
+# STEP 2: Merge LoRA Adapter & Compress to FP8-Dynamic
+# ------------------------------------------------------------------------------
+echo ""
 echo "============================================================"
-echo "[SUCCESS] Gemma 4 Adapter Fine-Tuning finished successfully!"
+echo " [STEP 2/2] Merging Adapter into Base Model & Quantizing to FP8"
+echo "============================================================"
+apptainer exec \
+  --nv \
+  --env HF_HOME="${HF_CACHE_DIR}" \
+  --env HF_HUB_OFFLINE=1 \
+  --env TRANSFORMERS_OFFLINE=1 \
+  --env HF_HUB_DISABLE_TELEMETRY=1 \
+  "${LOCAL_SCRATCH_ARGS[@]}" \
+  --bind "${WORKSPACE_ROOT}:/repo" \
+  --bind "${HF_CACHE_DIR}:${HF_CACHE_DIR}" \
+  --bind "${HF_CACHE_DIR}:/root/.cache/huggingface" \
+  --bind "${HOME}/.local:${HOME}/.local" \
+  --pwd /repo \
+  "${AXOLOTL_CONTAINER_DIR}" \
+  /workspace/axolotl-venv/bin/python /repo/src-train/merge_and_quantize.py
+
+echo ""
+echo "============================================================"
+echo "[SUCCESS] Pipeline Complete! Fine-tuned FP8 model is ready at:"
+echo "          ${WORKSPACE_ROOT}/local/models/gemma-4-26b-a4b-it-fp8"
 echo "============================================================"
