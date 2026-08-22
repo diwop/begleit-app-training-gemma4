@@ -27,14 +27,21 @@ for m in "${MODELS[@]}"; do
 done
 echo "============================================================"
 
-mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local"
-
-# 1. Ensure textstat and sentence-transformers are installed into user site packages
-echo "[INFO] Installing/verifying 'textstat', 'sentence-transformers', and 'llmcompressor' in SGLang environment..."
+# 1. Ensure textstat, sentence-transformers, and llmcompressor are installed in user site and virtualenvs
+echo "[INFO] Installing/verifying 'textstat', 'sentence-transformers', and 'llmcompressor'..."
 apptainer exec \
   --bind "${HOME}/.local:${HOME}/.local" \
   "${SGLANG_CONTAINER_DIR}" \
   "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor
+
+AXOLOTL_CONTAINER_DIR="${WORKSPACE_ROOT}/images/axolotl_sandbox"
+if [ -d "${AXOLOTL_CONTAINER_DIR}" ]; then
+  echo "[INFO] Installing 'llmcompressor' into Axolotl virtual environment..."
+  apptainer exec \
+    --bind "${HOME}/.local:${HOME}/.local" \
+    "${AXOLOTL_CONTAINER_DIR}" \
+    /workspace/axolotl-venv/bin/pip install --no-cache-dir llmcompressor || true
+fi
 
 # 2. Download model snapshots and Hub kernels into shared Hugging Face cache
 echo "[INFO] Downloading Hugging Face model and kernel snapshots..."
