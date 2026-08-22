@@ -73,6 +73,9 @@ fi
 
 mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local" "${WORKSPACE_ROOT}/local/adapters" "${WORKSPACE_ROOT}/local/models" "${WORKSPACE_ROOT}/logs"
 
+# Ensure stale prepared dataset caches are cleared
+rm -rf "${WORKSPACE_ROOT}/last_run_prepared"
+
 # ------------------------------------------------------------------------------
 # STEP 1: Axolotl LoRA Fine-Tuning
 # ------------------------------------------------------------------------------

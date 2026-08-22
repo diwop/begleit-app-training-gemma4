@@ -31,6 +31,12 @@ lora_r: 32
 lora_alpha: 64
 lora_dropout: 0.05
 
+# Disable experimental LoRA Triton kernel rewrites to prevent indexing conflicts on Gemma 4 fused attention
+lora_qkv_kernel: false
+lora_o_kernel: false
+lora_mlp_kernel: false
+lora_embedding_kernel: false
+
 # Fully qualified: targets language model layers only, avoiding vision tower (Gemma4ClippableLinear) and routers
 lora_target_modules: 'model\.language_model\.layers\.[\d]+\.(_checkpoint_wrapped_module\.)?(mlp|self_attn)\.(up|down|gate|q|k|v|o)_proj'
 
