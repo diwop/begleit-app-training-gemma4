@@ -46,10 +46,13 @@ except ImportError:
 from dynamic_few_shots import (
     DynamicFewShotIndex,
     build_dynamic_few_shot_user_prompt,
+    get_fitting_few_shot_examples,
 )
 
-# Context length for SGLang engine
-MAX_SEQUENCE_LENGTH = 16384
+# Context length and token budgets for SGLang engine
+MAX_SEQUENCE_LENGTH = 32768
+MAX_NEW_TOKENS = 8192
+MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
 
@@ -221,9 +224,10 @@ def main() -> None:
         records = integrity_records + records
         print(f"[INFO] Loaded {len(records)} total evaluation samples (including {len(integrity_records)} integrity checks).")
 
-    # 1. Initialize Dynamic Few-Shot RAG Index
-    print("\n[INFO] Initializing Dynamic Few-Shot Index from training dataset...")
-    retriever = DynamicFewShotIndex(dataset_path=TRAIN_DATA_PATH)
+    # 1. Resolve local offline model snapshot path & Tokenizer
+    model_path = get_model_snapshot_path(MODEL_NAME)
+    print(f"\n[INFO] Loading tokenizer from snapshot: {model_path}")
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     # 2. Build prompt conversations for all 3 modes
     zero_shot_conversations = [
@@ -234,25 +238,28 @@ def main() -> None:
         for rec in records
     ]
 
+    print(f"\n[INFO] Constructing Dynamic Few-Shot prompts with token budget (max input: {MAX_INPUT_TOKENS} tokens)...")
     few_shot_conversations = []
     for rec in records:
         if rec["id"] in ("i001", "i002"):
             few_shot_user_prompt = rec["user"]
         else:
             raw_user_in = load_raw_standardsprache(rec["id"]) or rec["user"]
-            top_examples = retriever.get_closest_examples(raw_user_in, k=2)
-            few_shot_user_prompt = build_dynamic_few_shot_user_prompt(raw_user_in, top_examples)
+            fitting_examples = get_fitting_few_shot_examples(
+                query=raw_user_in,
+                tokenizer=tokenizer,
+                max_input_tokens=MAX_INPUT_TOKENS,
+                max_examples=2,
+                dataset_path=TRAIN_DATA_PATH,
+            )
+            few_shot_user_prompt = build_dynamic_few_shot_user_prompt(raw_user_in, fitting_examples)
+            token_count = len(tokenizer.encode(few_shot_user_prompt, add_special_tokens=False))
+            print(f"[INFO] Sample '{rec['id']}': retrieved {len(fitting_examples)} few-shot demonstrations ({token_count} tokens).")
+
         few_shot_conversations.append([
             {"role": "system", "content": rec["system"]},
             {"role": "user", "content": few_shot_user_prompt},
         ])
-
-    # 3. Resolve local offline model snapshot path
-    model_path = get_model_snapshot_path(MODEL_NAME)
-
-    # Initialize Tokenizer for chat template formatting
-    print(f"\n[INFO] Loading tokenizer from snapshot: {model_path}")
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     prompts_no_thinking = [
         tokenizer.apply_chat_template(
