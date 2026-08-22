@@ -3,9 +3,8 @@ model_type: AutoModelForCausalLM
 tokenizer_type: AutoTokenizer
 
 # Gemma 4 Architecture & Attention Optimization
+attn_implementation: sdpa
 gemma4_hybrid_attn_impl: true
-flash_attention: false
-sdpa: true
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: false

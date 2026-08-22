@@ -8,11 +8,12 @@ SGLANG_CONTAINER_DIR="${WORKSPACE_ROOT}/images/sglang_sandbox"
 CONTAINER_PYTHON="/usr/bin/python3"
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
 
-# Models required for training, evaluation, and dynamic few-shot retrieval
+# Models and Hub kernel dependencies required for training, evaluation, and dynamic few-shot retrieval
 MODELS=(
   "google/gemma-4-26b-a4b-it"
   "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
   "intfloat/multilingual-e5-base"
+  "kernels-community/flash-attn2"
 )
 
 echo "============================================================"
@@ -36,7 +37,7 @@ apptainer exec \
   "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers llmcompressor
 
 # 2. Download model snapshots into shared Hugging Face cache
-echo "[INFO] Downloading Hugging Face model snapshots..."
+echo "[INFO] Downloading Hugging Face model and kernel snapshots..."
 apptainer exec \
   --env HF_HOME="${HF_CACHE_DIR}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
@@ -51,6 +52,7 @@ models = [
     'google/gemma-4-26b-a4b-it',
     'RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic',
     'intfloat/multilingual-e5-base',
+    'kernels-community/flash-attn2',
 ]
 token = os.environ.get('HF_TOKEN', None)
 
