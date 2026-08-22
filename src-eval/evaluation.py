@@ -57,7 +57,8 @@ MAX_SEQUENCE_LENGTH = 32768
 MAX_NEW_TOKENS = 8192
 MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
-MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
+# Default to 0 (evaluate entire dataset_eval.jsonl). Set MAX_EVAL_SAMPLES > 0 for quick smoke subsets.
+MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
 
 BASE_MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
 MERGED_MODEL_PATH = Path(os.environ.get("MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8"))
