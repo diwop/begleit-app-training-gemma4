@@ -86,7 +86,9 @@ apptainer exec \
   --pwd /repo \
   "${AXOLOTL_CONTAINER_DIR}" \
   /workspace/axolotl-venv/bin/accelerate launch \
+    --num_machines=1 \
     --num_processes="${NUM_GPUS}" \
+    --dynamo_backend=no \
     --mixed_precision=bf16 \
     -m axolotl.cli.train "${CONFIG_PATH}"
 
