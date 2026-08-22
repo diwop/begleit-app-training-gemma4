@@ -8,10 +8,11 @@ SGLANG_CONTAINER_DIR="${WORKSPACE_ROOT}/images/sglang_sandbox"
 CONTAINER_PYTHON="/usr/bin/python3"
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
 
-# Models required for training (bfloat16 unquantized) and evaluation (FP8 dynamic)
+# Models required for training, evaluation, and dynamic few-shot retrieval
 MODELS=(
   "google/gemma-4-26b-a4b-it"
   "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
+  "intfloat/multilingual-e5-base"
 )
 
 echo "============================================================"
@@ -27,12 +28,12 @@ echo "============================================================"
 
 mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local"
 
-# 1. Ensure textstat is installed into user site packages on shared filesystem
-echo "[INFO] Installing/verifying 'textstat' in SGLang environment..."
+# 1. Ensure textstat and sentence-transformers are installed into user site packages
+echo "[INFO] Installing/verifying 'textstat' and 'sentence-transformers' in SGLang environment..."
 apptainer exec \
   --bind "${HOME}/.local:${HOME}/.local" \
   "${SGLANG_CONTAINER_DIR}" \
-  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat
+  "${CONTAINER_PYTHON}" -m pip install --user --no-cache-dir --break-system-packages textstat sentence-transformers
 
 # 2. Download model snapshots into shared Hugging Face cache
 echo "[INFO] Downloading Hugging Face model snapshots..."
@@ -49,6 +50,7 @@ from huggingface_hub import snapshot_download
 models = [
     'google/gemma-4-26b-a4b-it',
     'RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic',
+    'intfloat/multilingual-e5-base',
 ]
 token = os.environ.get('HF_TOKEN', None)
 
