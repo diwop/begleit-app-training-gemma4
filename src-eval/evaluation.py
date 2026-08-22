@@ -407,6 +407,8 @@ def main() -> None:
             "system": rec["system"],
             "user_input": raw_user_input,
             "user_input_metrics": user_metrics,
+            "user": rec["user"],
+            "user_dynamic_few_shots": few_shot_conversations[idx][1]["content"],
             "assistant": rec["assistant"],
             "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,

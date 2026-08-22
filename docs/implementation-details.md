@@ -292,8 +292,9 @@ dvc repro
 ## 3. Gemma 4 Baseline Evaluation (`src-eval/evaluation.py`)
 
 Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **SGLang** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
-1. **Standard Translation** (`chat_template_kwargs={"enable_thinking": False}`)
-2. **Thinking-Enabled Translation** (`chat_template_kwargs={"enable_thinking": True}`)
+1. **Standard Zero-Shot Translation** (`enable_thinking=False`, $T=0.0$)
+2. **Thinking-Enabled Zero-Shot Translation** (`enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
+3. **Dynamic Few-Shot Translation with Thinking** ($k=2$ retrieved examples from training set via `multilingual-e5-base`, `enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
 
 Produces `data/results.jsonl` with German textstat readability metrics (`fre` = Flesch Reading Ease, `wstf` = Wiener Sachtextformel):
 ```json
@@ -302,16 +303,20 @@ Produces `data/results.jsonl` with German textstat readability metrics (`fre` = 
   "system": "<system-prompt>",
   "user_input": "<raw input text without template wrapper>",
   "user_input_metrics": { "fre": 45.2, "wstf": 11.4 },
+  "user": "<zero-shot prompt template wrapped text>",
+  "user_dynamic_few_shots": "<prompt template with 2 few-shot demonstrations>",
   "assistant": "<ground-truth Leichte_Sprache>",
   "assistant_metrics": { "fre": 88.5, "wstf": 4.1 },
   "assistant_gemma4": "<gemma4 output without thinking>",
   "assistant_gemma4_metrics": { "fre": 82.1, "wstf": 5.2 },
+  "assistant_gemma4_thinking_reasoning": "<gemma4 reasoning trace>",
   "assistant_gemma4_thinking": "<gemma4 output with thinking>",
-  "assistant_gemma4_thinking_metrics": { "fre": 85.3, "wstf": 4.6 }
+  "assistant_gemma4_thinking_metrics": { "fre": 85.3, "wstf": 4.6 },
+  "assistant_gemma4_dynamic_few_shots_reasoning": "<few-shots reasoning trace>",
+  "assistant_gemma4_dynamic_few_shots": "<gemma4 output with few-shots and thinking>",
+  "assistant_gemma4_dynamic_few_shots_metrics": { "fre": 87.1, "wstf": 4.2 }
 }
 ```
-
-### Pre-download Model on Login Node (`hsuper-login01`)
 
 ### Pre-download Models on Login Node (`hsuper-login01`)
 
@@ -322,7 +327,7 @@ Because GPU compute nodes do not have internet access, download both the LLM and
 export HF_TOKEN="hf_..."
 
 # Download models and install textstat & sentence-transformers to shared filesystem
-bash scripts/download_models.sh
+bash scripts/download_model.sh
 ```
 
 ---
