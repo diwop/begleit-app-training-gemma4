@@ -21,7 +21,7 @@ export ANONYMIZED_TELEMETRY=False
 export DISABLE_TELEMETRY=1
 
 echo "============================================================"
-echo " Starting Gemma 4 Baseline Evaluation (SGLang)"
+echo " Starting Gemma 4 Evaluation (SGLang)"
 echo "============================================================"
 echo "[INFO] Workspace       : ${WORKSPACE_ROOT}"
 echo "[INFO] Container       : ${SGLANG_CONTAINER_DIR}"
@@ -63,5 +63,5 @@ apptainer exec \
   "${CONTAINER_PYTHON}" /repo/src-eval/evaluation.py
 
 echo "============================================================"
-echo "[SUCCESS] Gemma 4 Baseline Evaluation finished!"
+echo "[SUCCESS] Gemma 4 Evaluation finished!"
 echo "============================================================"

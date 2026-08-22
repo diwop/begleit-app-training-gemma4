@@ -289,7 +289,7 @@ dvc repro
 
 ---
 
-## 3. Gemma 4 Baseline Evaluation (`src-eval/evaluation.py`)
+## 3. Gemma 4 Evaluation (`src-eval/evaluation.py`)
 
 Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **SGLang** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
 1. **Standard Zero-Shot Translation** (`enable_thinking=False`, $T=0.0$)
