@@ -197,23 +197,31 @@ def main() -> None:
 
     # Step 2: Quantize merged model into FP8-Dynamic
     try:
-        from transformers import AutoTokenizer
+        from transformers import AutoProcessor, AutoModelForCausalLM
+        from llmcompressor import oneshot
         from llmcompressor.modifiers.quantization import QuantizationModifier
-        from llmcompressor.transformers import SparseMLForCausalLM
     except ImportError as e:
         print(f"[ERROR] Required package for FP8 compression missing: {e}", file=sys.stderr)
         sys.exit(1)
 
     print("\n[STEP 2/3] Compressing merged model to FP8-Dynamic with llmcompressor...")
     t2 = time.time()
-    recipe = QuantizationModifier(targets="Linear", scheme="FP8_DYNAMIC")
-    SparseMLForCausalLM.compress(
-        model_path=str(merged_bf16_path),
-        recipe=recipe,
-        output_dir=str(output_fp8_path),
+    model = AutoModelForCausalLM.from_pretrained(
+        str(merged_bf16_path),
+        torch_dtype="auto",
+        device_map="cpu",
+        trust_remote_code=True,
     )
-    tokenizer = AutoTokenizer.from_pretrained(str(merged_bf16_path), trust_remote_code=True, local_files_only=True)
-    tokenizer.save_pretrained(str(output_fp8_path))
+    processor = AutoProcessor.from_pretrained(str(merged_bf16_path), trust_remote_code=True)
+
+    recipe = QuantizationModifier(
+        targets="Linear",
+        scheme="FP8_DYNAMIC",
+        ignore=["re:.*vision.*", "re:.*norm.*", "re:.*embed.*", "re:.*router.*", "re:.*gate$"],
+    )
+    oneshot(model=model, recipe=recipe)
+    model.save_pretrained(str(output_fp8_path))
+    processor.save_pretrained(str(output_fp8_path))
     print(f"[SUCCESS] FP8 compression completed in {time.time() - t2:.1f}s")
 
     # Step 3: Cleanup intermediate unquantized BF16 model if requested
