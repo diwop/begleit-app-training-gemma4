@@ -8,6 +8,18 @@ AXOLOTL_CONTAINER_DIR="${WORKSPACE_ROOT}/images/axolotl_sandbox"
 HF_CACHE_DIR="${HOME}/.cache/huggingface"
 CONFIG_PATH="/repo/src-train/config.yml"
 
+# Disable all external telemetry and tracking in host and container environments
+export DO_NOT_TRACK=1
+export AXOLOTL_DO_NOT_TRACK=1
+export POSTHOG_DISABLED=1
+export HF_HUB_DISABLE_TELEMETRY=1
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export WANDB_DISABLED=true
+export WANDB_MODE=offline
+export ANONYMIZED_TELEMETRY=False
+export DISABLE_TELEMETRY=1
+
 echo "============================================================"
 echo " Starting Gemma 4 26B-A4B End-to-End Pipeline"
 echo " (1. LoRA Fine-Tuning  ->  2. Merge & FP8 Quantization)"
@@ -75,6 +87,13 @@ apptainer exec \
   --env HF_HUB_OFFLINE=1 \
   --env TRANSFORMERS_OFFLINE=1 \
   --env HF_HUB_DISABLE_TELEMETRY=1 \
+  --env DO_NOT_TRACK=1 \
+  --env AXOLOTL_DO_NOT_TRACK=1 \
+  --env POSTHOG_DISABLED=1 \
+  --env WANDB_DISABLED=true \
+  --env WANDB_MODE=offline \
+  --env ANONYMIZED_TELEMETRY=False \
+  --env DISABLE_TELEMETRY=1 \
   --env NCCL_P2P_DISABLE=1 \
   --env NCCL_IB_DISABLE=1 \
   --env TORCH_NCCL_BLOCKING_WAIT=1 \
@@ -107,6 +126,13 @@ apptainer exec \
   --env HF_HUB_OFFLINE=1 \
   --env TRANSFORMERS_OFFLINE=1 \
   --env HF_HUB_DISABLE_TELEMETRY=1 \
+  --env DO_NOT_TRACK=1 \
+  --env AXOLOTL_DO_NOT_TRACK=1 \
+  --env POSTHOG_DISABLED=1 \
+  --env WANDB_DISABLED=true \
+  --env WANDB_MODE=offline \
+  --env ANONYMIZED_TELEMETRY=False \
+  --env DISABLE_TELEMETRY=1 \
   "${LOCAL_SCRATCH_ARGS[@]}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --bind "${HF_CACHE_DIR}:${HF_CACHE_DIR}" \
