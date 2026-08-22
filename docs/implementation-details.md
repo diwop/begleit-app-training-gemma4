@@ -403,7 +403,7 @@ Fine-tunes a LoRA adapter on `google/gemma-4-26b-a4b-it` using **Axolotl** with 
 
 On the **login node** (`hsuper-login01`):
 ```bash
-bash scripts/download_model.sh
+bash scripts/download_models.sh
 ```
 
 ### Run Combined Fine-Tuning, Merge & FP8 Quantization on GPU Node
