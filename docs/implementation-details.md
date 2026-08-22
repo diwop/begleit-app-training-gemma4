@@ -395,10 +395,6 @@ Fine-tunes a LoRA adapter on `google/gemma-4-26b-a4b-it` using **Axolotl** with 
    - DeepSpeed ZeRO-3 offloads optimizer states and parameters to CPU RAM (`src-train/deepspeed_zero3.json`), enabling unquantized bfloat16 training of 26B MoE parameters.
    - When running under Slurm, `scripts/run_training.sh` automatically routes high-IOPS temporary caches (`TMPDIR`, `TRITON_CACHE_DIR`, `TORCH_EXTENSIONS_DIR`) to the node's local NVMe SSD (`$SLURM_TMPDIR`), preventing network storage bottlenecks while saving the final adapter to `local/adapters/`.
 
-4. **Fast Initial Smoke Verification vs. Full Run**:
-   - Initial verification uses `data/dataset_train_sample.jsonl` (first 8 samples) and `num_epochs: 1` (`#SBATCH --time=00:45:00`).
-   - For full training, switch `datasets.path` in `src-train/config.yml` to `data/dataset_train.jsonl` and set `num_epochs: 3`.
-
 ### Pre-download Training & Evaluation Models
 
 On the **login node** (`hsuper-login01`):
