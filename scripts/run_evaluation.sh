@@ -51,7 +51,9 @@ apptainer exec \
   --env WANDB_MODE=offline \
   --env ANONYMIZED_TELEMETRY=False \
   --env DISABLE_TELEMETRY=1 \
-  --env PYTHONPATH="/repo/src-eval" \
+  --env PYTHONUSERBASE="${HOME}/.local" \
+  --env PYTHONNOUSERSITE=0 \
+  --env PYTHONPATH="/repo/src-eval:${HOME}/.local/lib/python3.12/site-packages:${HOME}/.local/lib/python3.11/site-packages:${PYTHONPATH:-}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --bind "${HF_CACHE_DIR}:${HF_CACHE_DIR}" \
   --bind "${HF_CACHE_DIR}:/root/.cache/huggingface" \
