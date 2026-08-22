@@ -43,7 +43,9 @@ def main() -> None:
     print(f"  Transformers   : {get_pkg_version('transformers')}")
     print(f"  FlashInfer     : {get_pkg_version('flashinfer')}")
     print(f"  Ray            : {get_pkg_version('ray')}")
-    print(f"  TrtLLM         : {get_pkg_version('tensorrt_llm')}")
+    print(f"  SentenceTransf : {get_pkg_version('sentence-transformers')}")
+    print(f"  Textstat       : {get_pkg_version('textstat')}")
+    print(f"  LLMCompressor  : {get_pkg_version('llmcompressor')}")
 
     # 3. PyTorch & CUDA Information
     print("\n[PyTorch & CUDA Environment]")

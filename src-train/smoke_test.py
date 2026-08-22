@@ -47,6 +47,16 @@ def main():
     print(f"  Accelerate     : {get_pkg_version('accelerate')}")
     print(f"  BitsAndBytes   : {get_pkg_version('bitsandbytes')}")
     print(f"  Triton         : {get_pkg_version('triton')}")
+    print(f"  LLMCompressor  : {get_pkg_version('llmcompressor')}")
+
+    # Functional test for llmcompressor oneshot API
+    try:
+        from llmcompressor import oneshot
+        from llmcompressor.modifiers.quantization import QuantizationModifier
+        _ = QuantizationModifier(targets="Linear", scheme="FP8_DYNAMIC")
+        print("  LLMCompressor  : Functional (oneshot & QuantizationModifier verified)")
+    except Exception as e:
+        print(f"  LLMCompressor  : Functional Test Failed ({e})")
 
     # 3. PyTorch & CUDA Information
     print("\n[PyTorch & CUDA Environment]")

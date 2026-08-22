@@ -43,7 +43,11 @@ echo ""
 echo "[STEP 1/2] Executing Axolotl Training Container Smoke Test..."
 echo "[INFO] Container: ${AXOLOTL_SANDBOX}"
 apptainer exec --nv \
+  --env PYTHONUSERBASE="${HOME}/.local" \
+  --env PYTHONNOUSERSITE=0 \
+  --env PYTHONPATH="${HOME}/.local/lib/python3.12/site-packages:${HOME}/.local/lib/python3.11/site-packages:${PYTHONPATH:-}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
+  --bind "${HOME}/.local:${HOME}/.local" \
   --pwd /repo \
   "${AXOLOTL_SANDBOX}" \
   /workspace/axolotl-venv/bin/python /repo/src-train/smoke_test.py
@@ -53,7 +57,11 @@ echo ""
 echo "[STEP 2/2] Executing SGLang Evaluation Container Smoke Test..."
 echo "[INFO] Container: ${SGLANG_SANDBOX}"
 apptainer exec --nv \
+  --env PYTHONUSERBASE="${HOME}/.local" \
+  --env PYTHONNOUSERSITE=0 \
+  --env PYTHONPATH="${HOME}/.local/lib/python3.12/site-packages:${HOME}/.local/lib/python3.11/site-packages:${PYTHONPATH:-}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
+  --bind "${HOME}/.local:${HOME}/.local" \
   --pwd /repo \
   "${SGLANG_SANDBOX}" \
   /usr/bin/python3 /repo/src-eval/smoke_test.py
