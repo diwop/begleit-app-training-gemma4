@@ -8,5 +8,4 @@ stages:
       - src-train/prepare_data.py
     outs:
       - data/dataset_train.jsonl
-      - data/dataset_train_sample.jsonl
       - data/dataset_eval.jsonl

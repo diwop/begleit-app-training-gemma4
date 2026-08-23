@@ -113,7 +113,7 @@ The smoke test verifies that:
   PEFT           : 0.20.0
   Accelerate     : 1.13.0
   BitsAndBytes   : 0.50.0
-  Flash-Attn     : Not Installed
+  LLMCompressor  : 0.13.0
   Triton         : 3.7.0
   SGLang         : Not Installed
 
@@ -289,7 +289,7 @@ dvc repro
 
 ---
 
-## 3. Gemma 4 Baseline Evaluation (`src-eval/evaluation.py`)
+## 3. Gemma 4 Evaluation (`src-eval/evaluation.py`)
 
 Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **SGLang** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
 1. **Standard Zero-Shot Translation** (`enable_thinking=False`, $T=0.0$)
@@ -390,28 +390,29 @@ Fine-tunes a LoRA adapter on `google/gemma-4-26b-a4b-it` using **Axolotl** with 
      - "<turn|>"
    ```
 
-3. **Multi-GPU & DeepSpeed ZeRO-3**:
+3. **Multi-GPU, DeepSpeed ZeRO-3 & Local NVMe Scratch (`$SLURM_TMPDIR`)**:
    - Requires at least 2 GPUs (`scripts/run_training.sh` automatically verifies GPU count and fails fast if `< 2`).
    - DeepSpeed ZeRO-3 offloads optimizer states and parameters to CPU RAM (`src-train/deepspeed_zero3.json`), enabling unquantized bfloat16 training of 26B MoE parameters.
-
-4. **Fast Initial Smoke Verification vs. Full Run**:
-   - Initial verification uses `data/dataset_train_sample.jsonl` (first 10 samples) and `num_epochs: 1` (`#SBATCH --time=00:30:00`).
-   - For full training, switch `datasets.path` in `src-train/config.yml` to `data/dataset_train.jsonl` and set `num_epochs: 3`.
+   - When running under Slurm, `scripts/run_training.sh` automatically routes high-IOPS temporary caches (`TMPDIR`, `TRITON_CACHE_DIR`, `TORCH_EXTENSIONS_DIR`) to the node's local NVMe SSD (`$SLURM_TMPDIR`), preventing network storage bottlenecks while saving the final adapter to `local/adapters/`.
 
 ### Pre-download Training & Evaluation Models
 
 On the **login node** (`hsuper-login01`):
 ```bash
-bash scripts/download_model.sh
+bash scripts/download_models.sh
 ```
 
-### Run Fine-Tuning on GPU Compute Node
+### Run Combined Fine-Tuning, Merge & FP8 Quantization on GPU Node
+
+The runner script `scripts/run_training.sh` automatically performs the end-to-end pipeline:
+1. Distributed Axolotl LoRA fine-tuning across 2+ GPUs -> saves adapter to `local/adapters/gemma-4-26b-a4b-it-lora`.
+2. Merges LoRA into base model and compresses to **FP8-Dynamic** via `llmcompressor` (`src-train/merge_and_quantize.py`) -> saves production model to `local/models/gemma-4-26b-a4b-it-fp8`.
 
 #### Option 1: Interactive Node (`salloc`)
 ```bash
-salloc --partition=small_gpu8 --gpus 2 --time=00:30:00
+salloc --partition=small_gpu8 --gpus 2 --time=00:45:00
 ssh <assigned-gpu-node>
-cd $HOME/begleit-app-training-gemma4
+cd $HOME/begleit-app-training-gemma4-adapter-tuning
 bash scripts/run_training.sh
 ```
 
@@ -419,3 +420,21 @@ bash scripts/run_training.sh
 ```bash
 sbatch scripts/submit_training.sbatch
 ```
+
+---
+
+## 5. 5-Pass SGLang Evaluation (`src-eval/evaluation.py`)
+
+Run the 5-pass evaluation on the evaluation split using SGLang:
+```bash
+sbatch scripts/submit_evaluation.sbatch
+# Or interactively:
+# bash scripts/run_evaluation.sh
+```
+
+The script evaluates:
+1. Base Model Zero-Shot (`enable_thinking=False`)
+2. Base Model Zero-Shot WITH Thinking (`enable_thinking=True`)
+3. Base Model Dynamic Few-Shot WITH Thinking
+4. Fine-Tuned Merged FP8 Model WITHOUT Thinking (`enable_thinking=False`)
+5. Fine-Tuned Merged FP8 Model WITH Thinking (`enable_thinking=True`)
