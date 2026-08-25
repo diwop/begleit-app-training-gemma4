@@ -420,7 +420,7 @@ def main() -> None:
             enable_lora=True,
             lora_paths={"adapter": str(ADAPTER_DIR)},
             max_loras_per_batch=1,
-            max_lora_dim=64,
+            max_lora_rank=64,
         )
 
         print("=" * 60)
@@ -428,11 +428,11 @@ def main() -> None:
         print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         step5_start = time.time()
 
-        sampling_params_lora = {
-            **sampling_params_thinking,
-            "lora_path": str(ADAPTER_DIR),
-        }
-        adapter_16bit_outputs = engine_16b.generate(prompts_thinking, sampling_params_lora)
+        adapter_16bit_outputs = engine_16b.generate(
+            prompts_thinking,
+            sampling_params_thinking,
+            lora_path=str(ADAPTER_DIR),
+        )
 
         step5_elapsed = time.time() - step5_start
         print(f"[SUCCESS] Step 5 completed in {step5_elapsed:.1f}s ({step5_elapsed/len(records):.2f}s/sample)\n")
