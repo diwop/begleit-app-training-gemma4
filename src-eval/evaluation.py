@@ -48,6 +48,7 @@ except ImportError:
 from dynamic_few_shots import (
     DynamicFewShotIndex,
     build_dynamic_few_shot_user_prompt,
+    extract_raw_standardsprache,
     get_fitting_few_shot_examples,
 )
 
@@ -138,14 +139,6 @@ def get_model_snapshot_path(model_name: str) -> str:
     resolved_path = str(snapshots[0])
     print(f"[INFO] Resolved local model snapshot: {resolved_path}")
     return resolved_path
-
-
-def load_raw_standardsprache(doc_id: str, raw_dir: Path = Path("data/raw")) -> str:
-    """Load raw Standardsprache text from data/raw/{id}_Standardsprache.txt."""
-    raw_file = raw_dir / f"{doc_id}_Standardsprache.txt"
-    if raw_file.exists():
-        return raw_file.read_text(encoding="utf-8").strip()
-    return ""
 
 
 def load_eval_data(path: Path) -> list[dict[str, str]]:
@@ -249,7 +242,7 @@ def main() -> None:
         if rec["id"] in ("i001", "i002"):
             few_shot_user_prompt = rec["user"]
         else:
-            raw_user_in = load_raw_standardsprache(rec["id"]) or rec["user"]
+            raw_user_in = extract_raw_standardsprache(text=rec.get("user", ""), doc_id=rec["id"])
             fitting_examples = get_fitting_few_shot_examples(
                 query=raw_user_in,
                 tokenizer=tokenizer,
@@ -429,9 +422,13 @@ def main() -> None:
         raw_few_shots = extract_output_text(few_shot_outputs[idx])
         few_shots_reasoning, out_few_shots = extract_gemma4_reasoning(raw_few_shots)
 
-        raw_user_input = load_raw_standardsprache(rec["id"]) if rec["id"] not in ("i001", "i002") else rec["user"]
-        if not raw_user_input:
+        # Extract clean raw Standardsprache input text without prompt template wrapper
+        if rec["id"] == "i001":
             raw_user_input = rec["user"]
+        elif rec["id"] == "i002":
+            raw_user_input = extract_raw_standardsprache(rec["user"])
+        else:
+            raw_user_input = extract_raw_standardsprache(text=rec.get("user", ""), doc_id=rec["id"])
 
         user_metrics = get_raw_metrics(raw_user_input)
         assistant_metrics = get_raw_metrics(rec["assistant"]) if rec["assistant"] is not None else None
