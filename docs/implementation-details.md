@@ -423,9 +423,9 @@ sbatch scripts/submit_training.sbatch
 
 ---
 
-## 5. 5-Pass SGLang Evaluation (`src-eval/evaluation.py`)
+## 5. 4-Pass SGLang Evaluation (`src-eval/evaluation.py`)
 
-Run the 5-pass evaluation on the evaluation split using SGLang:
+Run the 4-pass evaluation on the evaluation split using SGLang:
 ```bash
 sbatch scripts/submit_evaluation.sbatch
 # Or interactively:
@@ -436,5 +436,4 @@ The script evaluates:
 1. Base Model Zero-Shot (`enable_thinking=False`)
 2. Base Model Zero-Shot WITH Thinking (`enable_thinking=True`)
 3. Base Model Dynamic Few-Shot WITH Thinking
-4. Fine-Tuned Merged FP8 Model WITHOUT Thinking (`enable_thinking=False`)
-5. Fine-Tuned Merged FP8 Model WITH Thinking (`enable_thinking=True`)
+4. Fine-Tuned Merged FP8 Model WITH Thinking (`enable_thinking=True`)
