@@ -148,6 +148,22 @@ def get_model_snapshot_path(model_name: str, required: bool = True) -> str:
     return resolved_path
 
 
+def ensure_sglang_compatible_adapter_config(adapter_path: Path) -> None:
+    """Ensure adapter_config.json uses a standard list for target_modules instead of regex for SGLang compatibility."""
+    config_file = adapter_path / "adapter_config.json"
+    if not config_file.exists():
+        return
+    with config_file.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+    target_modules = config.get("target_modules")
+    if isinstance(target_modules, str) and target_modules not in ("all", "all-linear"):
+        print(f"[INFO] Converting regex target_modules in {config_file} to standard list for SGLang compatibility.")
+        standard_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        config["target_modules"] = standard_modules
+        with config_file.open("w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+
+
 def load_eval_data(path: Path) -> list[dict[str, str]]:
     """Load evaluation samples from JSONL."""
     if not path.exists():
@@ -320,6 +336,9 @@ def main() -> None:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             gc.collect()
+
+        # Ensure adapter config uses standard list of target modules for SGLang compatibility
+        ensure_sglang_compatible_adapter_config(ADAPTER_DIR)
 
         # Tensor Parallel size for 16-bit 26B model: requires 2 GPUs (TP=2) for 52 GB model in 96 GB VRAM
         tp_size_16b = 2 if gpu_count in (2, 3) else min(gpu_count, 4)
