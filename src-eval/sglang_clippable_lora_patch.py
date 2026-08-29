@@ -3,18 +3,20 @@ Monkey-patch SGLang to support Gemma 4 architecture with LoRA adapters:
 1. Support Gemma 4 Clippable linear layers (ClippableRowParallelLinear, ClippableColumnParallelLinear,
    ClippableQKVParallelLinear, ClippableGateUpParallelLinear).
 2. Implement get_hidden_dim for Gemma4ForConditionalGeneration supporting sliding vs full attention layers.
+3. Ensure LoRAMemoryPool buffers and get_tensor handle ambiguous gate_up_proj/down_proj in MoE models.
 """
 
 import sys
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable, Dict, Set, List
 
 
 def apply_sglang_clippable_lora_patch():
     try:
         import sglang.srt.lora.layers as lora_layers
         import sglang.srt.lora.lora_manager as lora_manager
+        import sglang.srt.lora.mem_pool as mem_pool
         from sglang.srt.layers.clippable_linear import (
             ClippableRowParallelLinear,
             ClippableColumnParallelLinear,
@@ -150,6 +152,45 @@ def apply_sglang_clippable_lora_patch():
                 return hidden_size, hidden_size
 
         gemma4_mm.Gemma4ForConditionalGeneration.get_hidden_dim = gemma4_get_hidden_dim
+
+        # Patch LoRAMemoryPool get_tensor and init_buffers to ensure gate_up_proj / down_proj are available
+        orig_get_tensor = mem_pool.LoRAMemoryPool.get_tensor
+
+        def patched_get_tensor(self, target_module: str, layer_id: int, lora_type: mem_pool.LoRAType) -> torch.Tensor:
+            buffer_dict = self.A_buffer if lora_type == mem_pool.LoRAType.LORA_A else self.B_buffer
+            if target_module not in buffer_dict:
+                if f"{target_module}_moe" in buffer_dict:
+                    target_module = f"{target_module}_moe"
+                elif target_module.endswith("_moe") and target_module[:-4] in buffer_dict:
+                    target_module = target_module[:-4]
+            if target_module not in buffer_dict:
+                # If still not found, return empty placeholder tensor with matching device/dtype
+                first_key = next(iter(buffer_dict.keys()))
+                ref_tensor = buffer_dict[first_key][layer_id]
+                return torch.zeros((self.max_loras_per_batch, 0, ref_tensor.shape[-1]), dtype=self.dtype, device=ref_tensor.device)
+            return buffer_dict[target_module][layer_id]
+
+        mem_pool.LoRAMemoryPool.get_tensor = patched_get_tensor
+
+        orig_init_buffers = mem_pool.LoRAMemoryPool.init_buffers
+
+        def patched_init_buffers(self, base_model: torch.nn.Module):
+            orig_init_buffers(self, base_model)
+            device = next(base_model.parameters()).device
+            # Ensure both standard and moe keys are present in A_buffer and B_buffer
+            for buffer_dict, get_shape_fn in [(self.A_buffer, self.get_lora_A_shape), (self.B_buffer, self.get_lora_B_shape)]:
+                for mod in ["gate_up_proj", "down_proj"]:
+                    if mod not in buffer_dict:
+                        buffer_dict[mod] = [
+                            torch.zeros(
+                                get_shape_fn(mod, base_model, self.max_lora_rank, idx),
+                                dtype=self.dtype,
+                                device=device,
+                            )
+                            for idx in range(self.num_layer)
+                        ]
+
+        mem_pool.LoRAMemoryPool.init_buffers = patched_init_buffers
 
     except Exception as exc:
         print(f"[WARNING] Failed to apply sglang clippable lora patch: {exc}", file=sys.stderr)
