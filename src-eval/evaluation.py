@@ -31,6 +31,9 @@ os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
 
 import torch
 
+# Apply SGLang monkey patch for Gemma 4 clippable layers with LoRA
+import sglang_clippable_lora_patch
+
 try:
     import sglang as sgl
     from transformers import AutoTokenizer
