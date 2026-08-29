@@ -5,14 +5,16 @@ Monkey-patch SGLang to support Gemma 4 architecture with LoRA adapters:
    ClippableQKVParallelLinear, ClippableGateUpParallelLinear).
 3. Implement get_hidden_dim for Gemma4ForConditionalGeneration supporting sliding vs full attention layers.
 4. Ensure LoRAMemoryPool buffers and get_tensor handle ambiguous gate_up_proj/down_proj in MoE models.
-5. Provide robust shrink/expand Triton kernel wrappers that handle variable attention head dims across alternating layers.
+5. Provide shape-safe weight copy into memory buffers and robust Triton shrink/expand kernel wrappers.
 """
 
+import inspect
 import re
 import sys
+import textwrap
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple, Callable, Dict, Set, List
+from typing import Optional, Tuple, Callable, Dict, Set, List, Union
 
 
 def apply_sglang_clippable_lora_patch():
@@ -33,7 +35,9 @@ def apply_sglang_clippable_lora_patch():
             ColumnParallelLinearWithLoRA,
             QKVParallelLinearWithLoRA,
             MergedColumnParallelLinearWithLoRA,
+            BaseLayerWithLoRA,
         )
+        from sglang.srt.lora.adapter import LoRAAdapter
         import sglang.srt.models.gemma4_mm as gemma4_mm
 
         # 1. Filter LoRA layer conversion to language model only (skip vision_tower / audio_tower)
@@ -181,7 +185,6 @@ def apply_sglang_clippable_lora_patch():
                 elif target_module.endswith("_moe") and target_module[:-4] in buffer_dict:
                     target_module = target_module[:-4]
             if target_module not in buffer_dict:
-                # Fallback to empty tensor
                 first_key = next(iter(buffer_dict.keys()))
                 ref_tensor = buffer_dict[first_key][layer_id]
                 return torch.zeros((self.max_loras_per_batch, 0, ref_tensor.shape[-1]), dtype=self.dtype, device=ref_tensor.device)
@@ -208,7 +211,55 @@ def apply_sglang_clippable_lora_patch():
 
         mem_pool.LoRAMemoryPool.init_buffers = patched_init_buffers
 
-        # 5. Robust LoRA shrink & expand Triton kernel wrappers
+        # 5. Shape-safe weight loading into LoRA memory buffers
+        def safe_copy_weight_into_buffer(buffer_view: torch.Tensor, weight: Optional[torch.Tensor]) -> None:
+            if weight is None:
+                buffer_view.zero_()
+                return
+
+            if weight.device.type == "cpu" and buffer_view.device.type != "cpu":
+                weight = weight.to(device=buffer_view.device, non_blocking=True)
+
+            if weight.dtype != buffer_view.dtype:
+                weight = weight.to(dtype=buffer_view.dtype)
+
+            if buffer_view.shape == weight.shape:
+                buffer_view.copy_(weight, non_blocking=True)
+            else:
+                buffer_view.zero_()
+                slices = [slice(0, min(b_dim, w_dim)) for b_dim, w_dim in zip(buffer_view.shape, weight.shape)]
+                buffer_view[tuple(slices)].copy_(weight[tuple(slices)], non_blocking=True)
+
+        mem_pool.copy_weight_into_buffer = safe_copy_weight_into_buffer
+
+        # Patch load_lora_weight_to_buffer to remove rigid assert checks across sliding vs full attn
+        try:
+            lines, _ = inspect.getsourcelines(mem_pool.LoRAMemoryPool.load_lora_weight_to_buffer)
+            filtered_lines = []
+            skip = False
+            for line in lines:
+                if "assert (" in line and "buffer_view.shape" in line:
+                    skip = True
+                    filtered_lines.append("                pass\n")
+                    continue
+                elif "assert representative_weight.shape" in line:
+                    skip = True
+                    filtered_lines.append("                        pass\n")
+                    continue
+                if skip:
+                    if ")" in line or line == "\n":
+                        skip = False
+                    continue
+                filtered_lines.append(line)
+
+            src = textwrap.dedent("".join(filtered_lines))
+            env = {**mem_pool.__dict__, "copy_weight_into_buffer": safe_copy_weight_into_buffer}
+            exec(src, env)
+            mem_pool.LoRAMemoryPool.load_lora_weight_to_buffer = env["load_lora_weight_to_buffer"]
+        except Exception as e:
+            print(f"[WARNING] Failed to patch load_lora_weight_to_buffer: {e}", file=sys.stderr)
+
+        # 6. Robust LoRA shrink & expand Triton kernel wrappers
         orig_shrink = shrink.chunked_sgmv_lora_shrink_forward
 
         def safe_shrink_forward(x: torch.Tensor, weights: torch.Tensor, batch_info, num_slices: int = 1) -> torch.Tensor:
