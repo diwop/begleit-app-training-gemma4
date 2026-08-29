@@ -5,6 +5,7 @@ Monkey-patch SGLang to support Gemma 4 architecture with LoRA adapters:
    ClippableQKVParallelLinear, ClippableGateUpParallelLinear).
 3. Implement get_hidden_dim for Gemma4ForConditionalGeneration supporting sliding vs full attention layers.
 4. Ensure LoRAMemoryPool buffers and get_tensor handle ambiguous gate_up_proj/down_proj in MoE models.
+5. Provide robust shrink/expand Triton kernel wrappers that handle variable attention head dims across alternating layers.
 """
 
 import re
@@ -19,6 +20,8 @@ def apply_sglang_clippable_lora_patch():
         import sglang.srt.lora.layers as lora_layers
         import sglang.srt.lora.lora_manager as lora_manager
         import sglang.srt.lora.mem_pool as mem_pool
+        import sglang.kernels.ops.gemm.chunked_sgmv_shrink as shrink
+        import sglang.kernels.ops.gemm.chunked_sgmv_expand as expand
         from sglang.srt.layers.clippable_linear import (
             ClippableRowParallelLinear,
             ClippableColumnParallelLinear,
@@ -34,8 +37,6 @@ def apply_sglang_clippable_lora_patch():
         import sglang.srt.models.gemma4_mm as gemma4_mm
 
         # 1. Filter LoRA layer conversion to language model only (skip vision_tower / audio_tower)
-        orig_get_layer_id = lora_manager.get_layer_id
-
         def patched_get_layer_id(weight_name: str) -> Optional[int]:
             if "vision" in weight_name or "audio" in weight_name or "image" in weight_name:
                 return None
@@ -206,6 +207,65 @@ def apply_sglang_clippable_lora_patch():
                         ]
 
         mem_pool.LoRAMemoryPool.init_buffers = patched_init_buffers
+
+        # 5. Robust LoRA shrink & expand Triton kernel wrappers
+        orig_shrink = shrink.chunked_sgmv_lora_shrink_forward
+
+        def safe_shrink_forward(x: torch.Tensor, weights: torch.Tensor, batch_info, num_slices: int = 1) -> torch.Tensor:
+            if not x.is_contiguous():
+                x = x.contiguous()
+            if not weights.is_contiguous():
+                weights = weights.contiguous()
+
+            K = weights.shape[2]
+            if x.shape[-1] != K:
+                if x.shape[-1] > K and x.shape[-1] % K == 0:
+                    tp_size = x.shape[-1] // K
+                    tp_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+                    start = (tp_rank % tp_size) * K
+                    x = x[:, start:start + K].contiguous()
+                elif K > x.shape[-1] and K % x.shape[-1] == 0:
+                    tp_size = K // x.shape[-1]
+                    tp_rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+                    start = (tp_rank % tp_size) * x.shape[-1]
+                    weights = weights[:, :, start:start + x.shape[-1]].contiguous()
+                else:
+                    if x.shape[-1] < K:
+                        x = torch.nn.functional.pad(x, (0, K - x.shape[-1]))
+                    else:
+                        x = x[:, :K].contiguous()
+
+            return orig_shrink(x, weights, batch_info, num_slices)
+
+        shrink.chunked_sgmv_lora_shrink_forward = safe_shrink_forward
+
+        orig_expand = expand.chunked_sgmv_lora_expand_forward
+
+        def safe_expand_forward(
+            x: torch.Tensor,
+            weights: torch.Tensor,
+            batch_info,
+            slice_offsets: torch.Tensor,
+            max_slice_size: int,
+            base_output: Optional[torch.Tensor],
+        ) -> torch.Tensor:
+            if not x.is_contiguous():
+                x = x.contiguous()
+            if not weights.is_contiguous():
+                weights = weights.contiguous()
+
+            MAX_RANK = weights.shape[2]
+            num_slices = len(slice_offsets) - 1
+            expected_input_dim = num_slices * MAX_RANK
+            if x.shape[1] != expected_input_dim:
+                if x.shape[1] < expected_input_dim:
+                    x = torch.nn.functional.pad(x, (0, expected_input_dim - x.shape[1]))
+                else:
+                    x = x[:, :expected_input_dim].contiguous()
+
+            return orig_expand(x, weights, batch_info, slice_offsets, max_slice_size, base_output)
+
+        expand.chunked_sgmv_lora_expand_forward = safe_expand_forward
 
     except Exception as exc:
         print(f"[WARNING] Failed to apply sglang clippable lora patch: {exc}", file=sys.stderr)
