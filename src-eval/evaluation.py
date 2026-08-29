@@ -391,6 +391,8 @@ def main() -> None:
             max_loras_per_batch=1,
             max_lora_rank=64,
             disable_cuda_graph=True,
+            watchdog_timeout=1200,
+            dist_timeout=1200,
         )
 
         print("=" * 60)
