@@ -390,6 +390,7 @@ def main() -> None:
             lora_paths={"adapter": str(ADAPTER_DIR)},
             max_loras_per_batch=1,
             max_lora_rank=64,
+            disable_cuda_graph=True,
         )
 
         print("=" * 60)

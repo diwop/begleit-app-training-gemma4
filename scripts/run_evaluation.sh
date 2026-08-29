@@ -54,10 +54,12 @@ apptainer exec \
   --env PYTHONUSERBASE="${HOME}/.local" \
   --env PYTHONNOUSERSITE=0 \
   --env PYTHONPATH="/repo/src-eval:${HOME}/.local/lib/python3.12/site-packages:${HOME}/.local/lib/python3.11/site-packages:${PYTHONPATH:-}" \
+  --env TMPDIR=/tmp \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --bind "${HF_CACHE_DIR}:${HF_CACHE_DIR}" \
   --bind "${HF_CACHE_DIR}:/root/.cache/huggingface" \
   --bind "${HOME}/.local:${HOME}/.local" \
+  --bind "/tmp:/tmp" \
   --pwd /repo \
   "${SGLANG_CONTAINER_DIR}" \
   "${CONTAINER_PYTHON}" /repo/src-eval/evaluation.py
