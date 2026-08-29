@@ -401,7 +401,7 @@ def main() -> None:
         adapter_16bit_outputs = engine_16b.generate(
             prompts_thinking,
             sampling_params_thinking,
-            lora_path=str(ADAPTER_DIR),
+            lora_path="adapter",
         )
 
         step5_elapsed = time.time() - step5_start
