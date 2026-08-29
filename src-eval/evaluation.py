@@ -148,20 +148,51 @@ def get_model_snapshot_path(model_name: str, required: bool = True) -> str:
     return resolved_path
 
 
-def ensure_sglang_compatible_adapter_config(adapter_path: Path) -> None:
-    """Ensure adapter_config.json uses a standard list for target_modules instead of regex for SGLang compatibility."""
+def ensure_sglang_compatible_adapter(adapter_path: Path) -> None:
+    """Ensure adapter_config.json and weights are fully compatible with SGLang dynamic LoRA loading."""
     config_file = adapter_path / "adapter_config.json"
-    if not config_file.exists():
-        return
-    with config_file.open("r", encoding="utf-8") as f:
-        config = json.load(f)
-    target_modules = config.get("target_modules")
-    if isinstance(target_modules, str) and target_modules not in ("all", "all-linear"):
-        print(f"[INFO] Converting regex target_modules in {config_file} to standard list for SGLang compatibility.")
-        standard_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-        config["target_modules"] = standard_modules
-        with config_file.open("w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+    if config_file.exists():
+        with config_file.open("r", encoding="utf-8") as f:
+            config = json.load(f)
+        target_modules = config.get("target_modules")
+        if isinstance(target_modules, str) and target_modules not in ("all", "all-linear"):
+            print(f"[INFO] Converting regex target_modules in {config_file} to standard list for SGLang compatibility.")
+            standard_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+            config["target_modules"] = standard_modules
+            with config_file.open("w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+
+    # In Gemma 4 architecture, full attention layers (5, 11, 17, 23, 29) have attention_k_eq_v: true and lack v_proj.
+    # SGLang normalize_qkv_proj unconditionally expects v_proj when q_proj is present.
+    # We supply zero-initialized dummy v_proj weights (which contribute zero to output) to satisfy SGLang concatenation.
+    safetensors_file = adapter_path / "adapter_model.safetensors"
+    if safetensors_file.exists():
+        try:
+            from safetensors import safe_open
+            from safetensors.torch import save_file
+
+            tensors = {}
+            with safe_open(str(safetensors_file), framework="pt") as f:
+                for k in f.keys():
+                    tensors[k] = f.get_tensor(k)
+
+            added = 0
+            for layer_num in range(30):
+                q_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.q_proj.lora_A.weight"
+                v_a_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.v_proj.lora_A.weight"
+                v_b_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.v_proj.lora_B.weight"
+                k_a_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.k_proj.lora_A.weight"
+                k_b_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.k_proj.lora_B.weight"
+                if q_k in tensors and v_a_k not in tensors:
+                    tensors[v_a_k] = torch.zeros_like(tensors[k_a_k])
+                    tensors[v_b_k] = torch.zeros_like(tensors[k_b_k])
+                    added += 2
+
+            if added > 0:
+                print(f"[INFO] Injected {added} zero-weight dummy v_proj tensors into {safetensors_file} for SGLang QKV alignment.")
+                save_file(tensors, str(safetensors_file))
+        except Exception as exc:
+            print(f"[WARNING] Could not check/patch safetensors file: {exc}")
 
 
 def load_eval_data(path: Path) -> list[dict[str, str]]:
@@ -337,8 +368,8 @@ def main() -> None:
             torch.cuda.empty_cache()
             gc.collect()
 
-        # Ensure adapter config uses standard list of target modules for SGLang compatibility
-        ensure_sglang_compatible_adapter_config(ADAPTER_DIR)
+        # Ensure adapter config and weights are compatible with SGLang dynamic LoRA
+        ensure_sglang_compatible_adapter(ADAPTER_DIR)
 
         # Tensor Parallel size for 16-bit 26B model: requires 2 GPUs (TP=2) for 52 GB model in 96 GB VRAM
         tp_size_16b = 2 if gpu_count in (2, 3) else min(gpu_count, 4)
