@@ -37,7 +37,6 @@ def apply_sglang_clippable_lora_patch():
             MergedColumnParallelLinearWithLoRA,
             BaseLayerWithLoRA,
         )
-        from sglang.srt.lora.adapter import LoRAAdapter
         import sglang.srt.models.gemma4_mm as gemma4_mm
 
         # 1. Filter LoRA layer conversion to language model only (skip vision_tower / audio_tower)
