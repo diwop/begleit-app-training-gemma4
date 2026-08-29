@@ -264,8 +264,9 @@ def main() -> None:
     print(f"[INFO] Output Results   : {RESULTS_OUTPUT_PATH}")
 
     gpu_count = torch.cuda.device_count()
-    tensor_parallel_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
-    print(f"[INFO] Detected GPUs    : {gpu_count} (Using Tensor Parallel Size: {tensor_parallel_size})")
+    tp_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
+    tensor_parallel_size = tp_size
+    print(f"[INFO] Detected GPUs    : {gpu_count} (Using Tensor Parallel Size: {tp_size})")
 
     records = load_eval_data(EVAL_DATA_PATH)
     default_system_prompt = records[0]["system"] if records else "Du bist ein hilfreicher Assistent für Leichte Sprache."
