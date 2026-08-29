@@ -46,6 +46,13 @@ def apply_sglang_clippable_lora_patch():
         except Exception:
             pass
 
+        # 2. Disable watchdog timer so multi-sample long-running generation is not terminated
+        try:
+            import sglang.srt.utils.watchdog as wd
+            wd.Watchdog.create = staticmethod(lambda *args, **kwargs: wd._WatchdogNoop())
+        except Exception:
+            pass
+
         # 2. Filter LoRA layer conversion to language model only (skip vision_tower / audio_tower)
         def patched_get_layer_id(weight_name: str) -> Optional[int]:
             if "vision" in weight_name or "audio" in weight_name or "image" in weight_name:
