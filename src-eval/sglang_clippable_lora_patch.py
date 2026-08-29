@@ -234,24 +234,17 @@ def apply_sglang_clippable_lora_patch():
         # Patch load_lora_weight_to_buffer to remove rigid assert checks across sliding vs full attn
         try:
             lines, _ = inspect.getsourcelines(mem_pool.LoRAMemoryPool.load_lora_weight_to_buffer)
-            filtered_lines = []
-            skip = False
-            for line in lines:
-                if "assert (" in line and "buffer_view.shape" in line:
-                    skip = True
-                    filtered_lines.append("                pass\n")
-                    continue
-                elif "assert representative_weight.shape" in line:
-                    skip = True
-                    filtered_lines.append("                        pass\n")
-                    continue
-                if skip:
-                    if ")" in line or line == "\n":
-                        skip = False
-                    continue
-                filtered_lines.append(line)
 
-            src = textwrap.dedent("".join(filtered_lines))
+            def replace_range(start, end):
+                indent = lines[start][:len(lines[start]) - len(lines[start].lstrip())]
+                for i in range(start, end):
+                    lines[i] = f"{indent}pass\n" if i == start else ""
+
+            replace_range(17, 20)
+            replace_range(308, 312)
+            replace_range(609, 613)
+
+            src = textwrap.dedent("".join(lines))
             env = {**mem_pool.__dict__, "copy_weight_into_buffer": safe_copy_weight_into_buffer}
             exec(src, env)
             mem_pool.LoRAMemoryPool.load_lora_weight_to_buffer = env["load_lora_weight_to_buffer"]
