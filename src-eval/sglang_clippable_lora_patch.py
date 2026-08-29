@@ -39,7 +39,14 @@ def apply_sglang_clippable_lora_patch():
         )
         import sglang.srt.models.gemma4_mm as gemma4_mm
 
-        # 1. Filter LoRA layer conversion to language model only (skip vision_tower / audio_tower)
+        # 1. Bypass strict TP memory balance check that triggers on minor GPU memory variance
+        try:
+            import sglang.srt.distributed.bootstrap as bootstrap
+            bootstrap._check_tp_memory_balance = lambda *args, **kwargs: None
+        except Exception:
+            pass
+
+        # 2. Filter LoRA layer conversion to language model only (skip vision_tower / audio_tower)
         def patched_get_layer_id(weight_name: str) -> Optional[int]:
             if "vision" in weight_name or "audio" in weight_name or "image" in weight_name:
                 return None

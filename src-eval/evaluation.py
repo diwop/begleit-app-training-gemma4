@@ -363,83 +363,12 @@ def main() -> None:
         "skip_special_tokens": False,
     }
 
-    # STEP 1 to 3: Base Model (Zero-Shot, Thinking, Dynamic Few-Shot)
-    base_model_path = get_model_snapshot_path(BASE_MODEL_NAME, required=True)
-    print("=" * 60)
-    print(f"[INFO] Initializing SGLang engine for Base Model ({BASE_MODEL_NAME})...")
-    print(f"[INFO] Using Tensor Parallel Size: {tp_size} (available GPUs: {gpu_count})")
-
-    engine = sgl.Engine(
-        model_path=base_model_path,
-        tp_size=tp_size,
-        trust_remote_code=True,
-        mem_fraction_static=0.85,
-        context_length=MAX_SEQUENCE_LENGTH,
-    )
-
-    # 1. Base model without thinking
-    print("=" * 60)
-    print(f"[STEP 1/5] Running Base Model WITHOUT thinking (enable_thinking=False, T=0.0) for {len(records)} samples...")
-    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    step1_start = time.time()
-    no_thinking_outputs = engine.generate(prompts_no_thinking, sampling_params_no_thinking)
-    step1_elapsed = time.time() - step1_start
-    print(f"[SUCCESS] Step 1 completed in {step1_elapsed:.1f}s ({step1_elapsed/len(records):.2f}s/sample)\n")
-
-    # 2. Base model with thinking
-    print("=" * 60)
-    print(f"[STEP 2/5] Running Base Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
-    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    step2_start = time.time()
-    thinking_outputs = engine.generate(prompts_thinking, sampling_params_thinking)
-    step2_elapsed = time.time() - step2_start
-    print(f"[SUCCESS] Step 2 completed in {step2_elapsed:.1f}s ({step2_elapsed/len(records):.2f}s/sample)\n")
-
-    # 3. Base model with dynamic few shots and thinking
-    print("=" * 60)
-    print(f"[STEP 3/5] Running Base Model WITH Dynamic Few-Shots & thinking for {len(records)} samples...")
-    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    step3_start = time.time()
-    few_shot_outputs = engine.generate(prompts_few_shots, sampling_params_thinking)
-    step3_elapsed = time.time() - step3_start
-    print(f"[SUCCESS] Step 3 completed in {step3_elapsed:.1f}s ({step3_elapsed/len(records):.2f}s/sample)\n")
-
-    engine.shutdown()
-
-    # STEP 4: Fine-Tuned Merged 8-bit Model Evaluation
+    # STEP 1 to 4: Temporarily commented out while validating Step 5 on full dataset
+    no_thinking_outputs = None
+    thinking_outputs = None
+    few_shot_outputs = None
     merged_adapter_8bit_outputs = None
-    if MERGED_MODEL_PATH.exists():
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            gc.collect()
-
-        print("=" * 60)
-        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Merged 8-bit Model ({MERGED_MODEL_PATH})...")
-        print(f"[INFO] Using Tensor Parallel Size: {tp_size} (available GPUs: {gpu_count})")
-
-        merged_engine = sgl.Engine(
-            model_path=str(MERGED_MODEL_PATH),
-            tp_size=tp_size,
-            trust_remote_code=True,
-            mem_fraction_static=0.85,
-            context_length=MAX_SEQUENCE_LENGTH,
-        )
-
-        print("=" * 60)
-        print(f"[STEP 4/5] Running Fine-Tuned Merged 8-bit Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
-        print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        step4_start = time.time()
-
-        merged_adapter_8bit_outputs = merged_engine.generate(prompts_thinking, sampling_params_thinking)
-
-        step4_elapsed = time.time() - step4_start
-        print(f"[SUCCESS] Step 4 completed in {step4_elapsed:.1f}s ({step4_elapsed/len(records):.2f}s/sample)\n")
-
-        merged_engine.shutdown()
-    else:
-        print("=" * 60)
-        print(f"[INFO] [STEP 4/5] Fine-tuned merged model not found at '{MERGED_MODEL_PATH}'.")
-        print("[INFO] Skipping Pass 4 (run scripts/merge_and_quantize.sh first to produce merged FP8 model).\n")
+    print("\n[INFO] Steps 1-4 commented out. Executing Phase 5 (16-bit Base Model + Unmerged LoRA Adapter) on full dataset.")
 
     # STEP 5: Fine-Tuned 16-bit Base Model + Unmerged LoRA Adapter Evaluation
     adapter_16bit_outputs = None
