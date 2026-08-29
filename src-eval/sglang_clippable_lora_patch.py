@@ -1,7 +1,8 @@
 """
-Monkey-patch SGLang to support Gemma 4 clippable linear layers with LoRA adapters.
-Gemma 4 uses ClippableRowParallelLinear, ClippableColumnParallelLinear, ClippableQKVParallelLinear,
-and ClippableGateUpParallelLinear, which wrap underlying parallel linear layers with activation clamping.
+Monkey-patch SGLang to support Gemma 4 architecture with LoRA adapters:
+1. Support Gemma 4 Clippable linear layers (ClippableRowParallelLinear, ClippableColumnParallelLinear,
+   ClippableQKVParallelLinear, ClippableGateUpParallelLinear).
+2. Implement get_hidden_dim for Gemma4ForConditionalGeneration supporting sliding vs full attention layers.
 """
 
 import sys
@@ -26,6 +27,7 @@ def apply_sglang_clippable_lora_patch():
             QKVParallelLinearWithLoRA,
             MergedColumnParallelLinearWithLoRA,
         )
+        import sglang.srt.models.gemma4_mm as gemma4_mm
 
         class ClippableRowParallelLinearWithLoRA(RowParallelLinearWithLoRA):
             def __init__(self, base_layer: ClippableRowParallelLinear, lora_backend):
@@ -98,8 +100,59 @@ def apply_sglang_clippable_lora_patch():
         lora_layers.ClippableColumnParallelLinearWithLoRA = ClippableColumnParallelLinearWithLoRA
         lora_layers.ClippableQKVParallelLinearWithLoRA = ClippableQKVParallelLinearWithLoRA
         lora_layers.ClippableGateUpParallelLinearWithLoRA = ClippableGateUpParallelLinearWithLoRA
+
+        # Implement get_hidden_dim for Gemma4ForConditionalGeneration
+        def gemma4_get_hidden_dim(self, module_name: str, layer_idx: int):
+            tc = getattr(self.config, "text_config", self.config)
+            is_full_attn = (
+                layer_idx in [5, 11, 17, 23, 29]
+                if layer_idx is not None
+                else False
+            )
+
+            if is_full_attn:
+                global_head_dim = getattr(tc, "global_head_dim", 512)
+                num_attn_heads = getattr(tc, "num_attention_heads", 16)
+                num_kv_heads = getattr(tc, "num_global_key_value_heads", 2)
+                q_dim = num_attn_heads * global_head_dim
+                k_dim = num_kv_heads * global_head_dim
+                v_dim = k_dim
+            else:
+                head_dim = getattr(tc, "head_dim", 256)
+                num_attn_heads = getattr(tc, "num_attention_heads", 16)
+                num_kv_heads = getattr(tc, "num_key_value_heads", 8)
+                q_dim = num_attn_heads * head_dim
+                k_dim = num_kv_heads * head_dim
+                v_dim = num_kv_heads * head_dim
+
+            hidden_size = getattr(tc, "hidden_size", 2816)
+            intermediate_size = getattr(tc, "intermediate_size", 2112)
+            moe_intermediate_size = getattr(tc, "moe_intermediate_size", 704)
+            vocab_size = getattr(tc, "vocab_size", 262144)
+
+            if module_name in ("qkv_proj", "q_proj", "k_proj", "v_proj"):
+                return hidden_size, q_dim + k_dim + v_dim
+            elif module_name == "o_proj":
+                return q_dim, hidden_size
+            elif module_name == "gate_up_proj":
+                return hidden_size, intermediate_size * 2
+            elif module_name == "down_proj":
+                return intermediate_size, hidden_size
+            elif module_name == "gate_up_proj_moe":
+                return hidden_size, moe_intermediate_size * 2
+            elif module_name == "down_proj_moe":
+                return moe_intermediate_size, hidden_size
+            elif module_name == "embed_tokens":
+                return vocab_size, hidden_size
+            elif module_name == "lm_head":
+                return hidden_size, vocab_size
+            else:
+                return hidden_size, hidden_size
+
+        gemma4_mm.Gemma4ForConditionalGeneration.get_hidden_dim = gemma4_get_hidden_dim
+
     except Exception as exc:
-        pass
+        print(f"[WARNING] Failed to apply sglang clippable lora patch: {exc}", file=sys.stderr)
 
 
 apply_sglang_clippable_lora_patch()
