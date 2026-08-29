@@ -1,11 +1,13 @@
 """
 Monkey-patch SGLang to support Gemma 4 architecture with LoRA adapters:
-1. Support Gemma 4 Clippable linear layers (ClippableRowParallelLinear, ClippableColumnParallelLinear,
+1. Filter LoRA layer conversion to language model layers only (exclude vision/audio towers in multimodal Gemma 4).
+2. Support Gemma 4 Clippable linear layers (ClippableRowParallelLinear, ClippableColumnParallelLinear,
    ClippableQKVParallelLinear, ClippableGateUpParallelLinear).
-2. Implement get_hidden_dim for Gemma4ForConditionalGeneration supporting sliding vs full attention layers.
-3. Ensure LoRAMemoryPool buffers and get_tensor handle ambiguous gate_up_proj/down_proj in MoE models.
+3. Implement get_hidden_dim for Gemma4ForConditionalGeneration supporting sliding vs full attention layers.
+4. Ensure LoRAMemoryPool buffers and get_tensor handle ambiguous gate_up_proj/down_proj in MoE models.
 """
 
+import re
 import sys
 import torch
 import torch.nn as nn
@@ -31,6 +33,20 @@ def apply_sglang_clippable_lora_patch():
         )
         import sglang.srt.models.gemma4_mm as gemma4_mm
 
+        # 1. Filter LoRA layer conversion to language model only (skip vision_tower / audio_tower)
+        orig_get_layer_id = lora_manager.get_layer_id
+
+        def patched_get_layer_id(weight_name: str) -> Optional[int]:
+            if "vision" in weight_name or "audio" in weight_name or "image" in weight_name:
+                return None
+            match = re.search(r"layers\.(\d+)\.", weight_name)
+            if match:
+                return int(match.group(1))
+            return None
+
+        lora_manager.get_layer_id = patched_get_layer_id
+
+        # 2. Support Clippable Linear layers with LoRA
         class ClippableRowParallelLinearWithLoRA(RowParallelLinearWithLoRA):
             def __init__(self, base_layer: ClippableRowParallelLinear, lora_backend):
                 super().__init__(base_layer.linear, lora_backend)
@@ -103,7 +119,7 @@ def apply_sglang_clippable_lora_patch():
         lora_layers.ClippableQKVParallelLinearWithLoRA = ClippableQKVParallelLinearWithLoRA
         lora_layers.ClippableGateUpParallelLinearWithLoRA = ClippableGateUpParallelLinearWithLoRA
 
-        # Implement get_hidden_dim for Gemma4ForConditionalGeneration
+        # 3. Implement get_hidden_dim for Gemma4ForConditionalGeneration
         def gemma4_get_hidden_dim(self, module_name: str, layer_idx: int):
             tc = getattr(self.config, "text_config", self.config)
             is_full_attn = (
@@ -153,7 +169,7 @@ def apply_sglang_clippable_lora_patch():
 
         gemma4_mm.Gemma4ForConditionalGeneration.get_hidden_dim = gemma4_get_hidden_dim
 
-        # Patch LoRAMemoryPool get_tensor and init_buffers to ensure gate_up_proj / down_proj are available
+        # 4. Patch LoRAMemoryPool get_tensor and init_buffers to ensure gate_up_proj / down_proj are available
         orig_get_tensor = mem_pool.LoRAMemoryPool.get_tensor
 
         def patched_get_tensor(self, target_module: str, layer_id: int, lora_type: mem_pool.LoRAType) -> torch.Tensor:
@@ -164,7 +180,7 @@ def apply_sglang_clippable_lora_patch():
                 elif target_module.endswith("_moe") and target_module[:-4] in buffer_dict:
                     target_module = target_module[:-4]
             if target_module not in buffer_dict:
-                # If still not found, return empty placeholder tensor with matching device/dtype
+                # Fallback to empty tensor
                 first_key = next(iter(buffer_dict.keys()))
                 ref_tensor = buffer_dict[first_key][layer_id]
                 return torch.zeros((self.max_loras_per_batch, 0, ref_tensor.shape[-1]), dtype=self.dtype, device=ref_tensor.device)
@@ -177,7 +193,6 @@ def apply_sglang_clippable_lora_patch():
         def patched_init_buffers(self, base_model: torch.nn.Module):
             orig_init_buffers(self, base_model)
             device = next(base_model.parameters()).device
-            # Ensure both standard and moe keys are present in A_buffer and B_buffer
             for buffer_dict, get_shape_fn in [(self.A_buffer, self.get_lora_A_shape), (self.B_buffer, self.get_lora_B_shape)]:
                 for mod in ["gate_up_proj", "down_proj"]:
                     if mod not in buffer_dict:
