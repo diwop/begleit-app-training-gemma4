@@ -71,6 +71,7 @@ ADAPTER_DIR = Path(os.environ.get("LORA_ADAPTER", "local/adapters/gemma-4-26b-a4
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 TRAIN_DATA_PATH = Path("data/dataset_train.jsonl")
 RESULTS_OUTPUT_PATH = Path(os.environ.get("EVAL_RESULTS_OUTPUT", "data/results.jsonl"))
+RESULTS_METADATA_PATH = Path(os.environ.get("EVAL_METADATA_OUTPUT", "data/results-metadata.json"))
 
 
 def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
