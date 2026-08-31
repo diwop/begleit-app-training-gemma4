@@ -67,8 +67,8 @@ MAX_SEQUENCE_LENGTH = 32768
 MAX_NEW_TOKENS = 8192
 MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
-# Default to 1 sample for targeted inspection. Set MAX_EVAL_SAMPLES=0 for full dataset.
-MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "1"))
+# Default to 8 samples for smoke test evaluation. Set MAX_EVAL_SAMPLES=0 for full dataset.
+MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
 
 BASE_16B_MODEL_NAME = "google/gemma-4-26b-a4b-it"
 ADAPTER_DIR = Path(os.environ.get("LORA_ADAPTER", "local/adapters/gemma-4-26b-a4b-it-lora"))
@@ -322,56 +322,16 @@ def main() -> None:
         dist_timeout=7200,
     )
     init_elapsed = time.time() - init_start
-    print(f"[SUCCESS] SGLang engine initialized in {init_elapsed:.1f}s.", flush=True)
-
     print("=" * 60)
-    print(f"[STEP 5/5] Running 16-bit Base Model + Unmerged LoRA Adapter WITH thinking for {len(records)} sample(s)...")
+    print(f"[STEP 5/5] Running 16-bit Base Model + Unmerged LoRA Adapter WITH thinking for {len(records)} sample(s) in a single batch...")
     print(f"[INFO] Start Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 
-    stream_log_dir = Path("logs")
-    stream_log_dir.mkdir(parents=True, exist_ok=True)
-
     step5_start = time.time()
-    adapter_16bit_outputs = []
-
-    for idx, (rec, prompt) in enumerate(zip(records, prompts_thinking)):
-        sample_id = rec.get("id", f"sample_{idx}")
-        live_file = stream_log_dir / f"eval_stream_{sample_id}.txt"
-        print(f"\n[INFO] Generating sample {idx+1}/{len(records)} (ID: {sample_id}) -> streaming to {live_file}...", flush=True)
-
-        sample_start = time.time()
-        final_sample_text = ""
-        try:
-            # Stream token generation to live disk file
-            stream_iter = engine_16b.generate(
-                prompt,
-                sampling_params_thinking,
-                stream=True,
-                lora_path="adapter",
-            )
-            with live_file.open("w", encoding="utf-8") as lf:
-                last_report = sample_start
-                for chunk in stream_iter:
-                    chunk_text = extract_output_text(chunk)
-                    final_sample_text = chunk_text
-                    lf.seek(0)
-                    lf.write(chunk_text)
-                    lf.truncate()
-                    lf.flush()
-                    if time.time() - last_report > 3.0:
-                        last_report = time.time()
-                        print(f"  [STREAMING] {len(chunk_text)} chars in {time.time()-sample_start:.1f}s...", flush=True)
-        except Exception as exc:
-            print(f"[WARNING] Streaming failed ({exc}), falling back to standard batch generation...", flush=True)
-            res = engine_16b.generate([prompt], sampling_params_thinking, lora_path="adapter")
-            final_sample_text = extract_output_text(res[0])
-            with live_file.open("w", encoding="utf-8") as lf:
-                lf.write(final_sample_text)
-
-        sample_elapsed = time.time() - sample_start
-        print(f"[SAMPLE COMPLETE] ID: {sample_id} | Length: {len(final_sample_text)} chars | Time: {sample_elapsed:.1f}s\n", flush=True)
-        adapter_16bit_outputs.append({"text": final_sample_text})
-
+    adapter_16bit_outputs = engine_16b.generate(
+        prompts_thinking,
+        sampling_params_thinking,
+        lora_path="adapter",
+    )
     step5_elapsed = time.time() - step5_start
     print(f"[SUCCESS] Step 5 completed in {step5_elapsed:.1f}s ({step5_elapsed/len(records):.2f}s/sample)\n", flush=True)
 
