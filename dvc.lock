@@ -34,3 +34,33 @@ stages:
       hash: md5
       md5: 994418c0f1bac9c20ed40c863a014d11
       size: 270480
+  prepare_data_dialogs:
+    cmd: python3 src-train/prepare_data_dialogs.py
+    deps:
+    - path: data/raw_dialogs
+      hash: md5
+      md5: b9332ac9e69b92320dc33515642ee395.dir
+      size: 26651
+      nfiles: 7
+    - path: prompts/prompt-template_dialogs.md
+      hash: md5
+      md5: 78f5f311209f8211c62d92f15758ef53
+      size: 238
+    - path: prompts/system-prompt_dialogs.md
+      hash: md5
+      md5: 5ce9596ab958b32f784390520fd5472b
+      size: 5082
+    - path: src-train/prepare_data_dialogs.py
+      hash: md5
+      md5: d3e77535a77ac547e74d81c686269e6f
+      size: 16233
+      isexec: true
+    outs:
+    - path: data/dataset_eval_dialogs.jsonl
+      hash: md5
+      md5: 435206aca74badbf50b1d8d94cdec446
+      size: 110945
+    - path: data/dataset_train_dialogs.jsonl
+      hash: md5
+      md5: 11bd499be0b6ec1357c119d2603732ab
+      size: 402896
