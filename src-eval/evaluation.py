@@ -130,7 +130,127 @@ def get_raw_metrics(text: str | None) -> dict[str, float]:
     except Exception:
         wstf = 0.0
 
-    return {"fre": fre, "wstf": wstf}
+def get_model_snapshot_path(model_name: str, required: bool = True) -> str:
+    """Get snapshot directory for model from Hugging Face cache or fail fast if required."""
+    if Path(model_name).exists():
+        return model_name
+
+    hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
+    repo_folder = "models--" + model_name.replace("/", "--")
+    snapshots_dir = hf_home / "hub" / repo_folder / "snapshots"
+
+    if not snapshots_dir.exists():
+        if required:
+            print(f"[ERROR] Hugging Face cache directory not found at: {snapshots_dir}", file=sys.stderr)
+            print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
+            sys.exit(1)
+        return ""
+
+    snapshots = sorted(
+        [p for p in snapshots_dir.iterdir() if p.is_dir()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not snapshots:
+        if required:
+            print(f"[ERROR] No snapshot directories found inside: {snapshots_dir}", file=sys.stderr)
+            print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
+            sys.exit(1)
+        return ""
+
+    resolved_path = str(snapshots[0])
+    print(f"[INFO] Resolved local model snapshot: {resolved_path}")
+    return resolved_path
+
+
+def load_eval_data(path: Path) -> list[dict[str, str]]:
+    """Load evaluation samples from JSONL."""
+    if not path.exists():
+        print(f"[ERROR] Evaluation dataset not found at {path}", file=sys.stderr)
+        print("[INFO] Run 'dvc repro' or 'python3 src-train/prepare_data.py' first.", file=sys.stderr)
+        sys.exit(1)
+
+    records = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            sys_prompt = ""
+            user_prompt = ""
+            assistant_prompt = ""
+            for msg in entry.get("messages", []):
+                role = msg.get("role")
+                if role == "system":
+                    sys_prompt = msg.get("content", "")
+                elif role == "user":
+                    user_prompt = msg.get("content", "")
+                elif role == "assistant":
+                    assistant_prompt = msg.get("content", "")
+            records.append({
+                "id": entry.get("id", f"sample_{len(records)}"),
+                "system": sys_prompt,
+                "user": user_prompt,
+                "assistant": assistant_prompt,
+            })
+    return records
+
+
+def get_integrity_checks(default_system_prompt: str) -> list[dict[str, str]]:
+    """Generates standard integrity test prompts."""
+    i001 = {
+        "id": "i001",
+        "system": default_system_prompt,
+        "user": "Erzähle einen Witz.",
+        "assistant": None,
+    }
+
+    train_path = Path("data/dataset_train.jsonl")
+    sample_text = None
+    if train_path.exists():
+        try:
+            with train_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        entry = json.loads(line)
+                        for msg in entry.get("messages", []):
+                            if msg.get("role") == "user":
+                                raw_extracted = extract_raw_standardsprache(text=msg.get("content", ""), doc_id=entry.get("id", ""))
+                                if raw_extracted and len(raw_extracted) > 40:
+                                    sample_text = raw_extracted
+                                    break
+                        if sample_text:
+                            break
+        except Exception:
+            pass
+
+    if sample_text:
+        i002_user = (
+            f"### Text in Standardsprache:\n```input\n{sample_text}\n```\n\n"
+            "### Aufgabe:\nÜbersetze den Text in Leichte Sprache. Beachte alle Regeln für Leichte Sprache."
+        )
+    else:
+        i002_user = (
+            "### Text in Standardsprache:\n```input\nWarum ist der Himmel blau und nicht schwarz?\n```\n\n"
+            "### Aufgabe:\nÜbersetze den Text in Leichte Sprache. Beachte alle Regeln für Leichte Sprache."
+        )
+
+    i002 = {
+        "id": "i002",
+        "system": default_system_prompt,
+        "user": i002_user,
+        "assistant": None,
+    }
+    return [i001, i002]
+
+
+def extract_output_text(output_obj: object) -> str:
+    """Extract string response from SGLang output item."""
+    if isinstance(output_obj, dict):
+        return output_obj.get("text", "").strip()
+    if hasattr(output_obj, "text"):
+        return output_obj.text.strip()
+    return str(output_obj).strip()
 
 
 def main() -> None:
