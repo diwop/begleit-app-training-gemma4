@@ -301,7 +301,8 @@ def main() -> None:
     print(f"[INFO] Target Metadata  : {RESULTS_METADATA_PATH}")
 
     gpu_count = torch.cuda.device_count()
-    tp_size_16b = 2 if gpu_count in (2, 3) else min(gpu_count, 4)
+    default_tp = 4 if gpu_count >= 4 else (2 if gpu_count in (2, 3) else min(gpu_count, 4))
+    tp_size_16b = int(os.environ.get("TENSOR_PARALLEL_SIZE", str(default_tp)))
     print(f"[INFO] Detected GPUs    : {gpu_count} (Using Tensor Parallel Size for 16-bit LoRA: {tp_size_16b})")
 
     if gpu_count < 2:
