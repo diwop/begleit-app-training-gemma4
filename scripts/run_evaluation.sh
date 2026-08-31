@@ -53,6 +53,7 @@ apptainer exec \
   --env DISABLE_TELEMETRY=1 \
   --env PYTHONUSERBASE="${HOME}/.local" \
   --env PYTHONNOUSERSITE=0 \
+  --env PYTHONUNBUFFERED=1 \
   --env PYTHONPATH="/repo/src-eval:${HOME}/.local/lib/python3.12/site-packages:${HOME}/.local/lib/python3.11/site-packages:${PYTHONPATH:-}" \
   --env TMPDIR=/tmp \
   --bind "${WORKSPACE_ROOT}:/repo" \

@@ -23,6 +23,7 @@ import os
 import json
 from pathlib import Path
 import re
+import socket
 import sys
 import time
 
@@ -34,6 +35,13 @@ os.environ["NCCL_IB_DISABLE"] = "1"
 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
 
 import torch
+
+def find_free_port() -> int:
+    """Find an available TCP port on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen(1)
+        return int(s.getsockname()[1])
 
 # Apply SGLang monkey patch for Gemma 4 clippable layers with LoRA
 import sglang_clippable_lora_patch
@@ -298,11 +306,16 @@ def main() -> None:
     print("=" * 60)
     print(f"[INFO] Initializing SGLang engine with 16-bit Base Model ({BASE_16B_MODEL_NAME}) + Unmerged LoRA ({ADAPTER_DIR})")
     print(f"[INFO] Fresh process with clean GPU VRAM (TP={tp_size_16b}, GPUs={gpu_count})")
-    print(f"[INFO] Evaluating in batches of size {EVAL_BATCH_SIZE} with incremental merge to: {RESULTS_OUTPUT_PATH}")
+    # Allocate dynamic collision-free ports
+    server_port = find_free_port()
+    nccl_port = find_free_port()
+    print(f"[INFO] Allocated dynamic SGLang server port: {server_port}, NCCL port: {nccl_port}", flush=True)
 
+    init_start = time.time()
     engine_16b = sgl.Engine(
         model_path=base_16b_path,
         tp_size=tp_size_16b,
+        port=server_port,
         trust_remote_code=True,
         mem_fraction_static=0.85,
         context_length=MAX_SEQUENCE_LENGTH,
@@ -314,6 +327,8 @@ def main() -> None:
         watchdog_timeout=86400,
         dist_timeout=7200,
     )
+    init_elapsed = time.time() - init_start
+    print(f"[SUCCESS] SGLang engine initialized in {init_elapsed:.1f}s.", flush=True)
 
     # Load existing entries from Steps 1-4
     existing_entries = {}
