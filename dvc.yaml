@@ -9,3 +9,14 @@ stages:
     outs:
       - data/dataset_train.jsonl
       - data/dataset_eval.jsonl
+
+  prepare_data_dialogs:
+    cmd: python3 src-train/prepare_data_dialogs.py
+    deps:
+      - prompts/system-prompt_dialogs.md
+      - prompts/prompt-template_dialogs.md
+      - data/raw_dialogs
+      - src-train/prepare_data_dialogs.py
+    outs:
+      - data/dataset_train_dialogs.jsonl
+      - data/dataset_eval_dialogs.jsonl
