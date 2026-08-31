@@ -66,9 +66,8 @@ MAX_SEQUENCE_LENGTH = 32768
 MAX_NEW_TOKENS = 8192
 MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
-# Default to 0 for full dataset evaluation. Set MAX_EVAL_SAMPLES=8 for smoke test.
-MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
-EVAL_BATCH_SIZE = int(os.environ.get("EVAL_BATCH_SIZE", "8"))
+# Default to 8 for smoke test evaluation. Set MAX_EVAL_SAMPLES=0 for full dataset.
+MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "8"))
 
 BASE_16B_MODEL_NAME = "google/gemma-4-26b-a4b-it"
 ADAPTER_DIR = Path(os.environ.get("LORA_ADAPTER", "local/adapters/gemma-4-26b-a4b-it-lora"))
@@ -330,144 +329,18 @@ def main() -> None:
     init_elapsed = time.time() - init_start
     print(f"[SUCCESS] SGLang engine initialized in {init_elapsed:.1f}s.", flush=True)
 
-    # Load existing entries from Steps 1-4
-    existing_entries = {}
-    if RESULTS_OUTPUT_PATH.exists():
-        with RESULTS_OUTPUT_PATH.open("r", encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    item = json.loads(line)
-                    existing_entries[item["id"]] = item
-
-    # Pair records with prompts
-    samples_to_eval = list(zip(records, prompts_thinking))
-    total_samples = len(samples_to_eval)
-    num_batches = (total_samples + EVAL_BATCH_SIZE - 1) // EVAL_BATCH_SIZE
-
     print("=" * 60)
-    print(f"[STEP 5/5] Running 16-bit Base Model + Unmerged LoRA Adapter WITH thinking for {total_samples} samples across {num_batches} batches (batch size: {EVAL_BATCH_SIZE})...")
+    print(f"[STEP 5/5] Running 16-bit Base Model + Unmerged LoRA Adapter WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples in a single batch...")
     print(f"[INFO] Start Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
 
     step5_start = time.time()
-    total_generated_tokens = 0
-    all_outputs = []
-    fre_16b_scores = []
-    wstf_16b_scores = []
-
-    for batch_idx in range(num_batches):
-        start_idx = batch_idx * EVAL_BATCH_SIZE
-        end_idx = min(start_idx + EVAL_BATCH_SIZE, total_samples)
-        batch_items = samples_to_eval[start_idx:end_idx]
-        batch_records = [item[0] for item in batch_items]
-        batch_prompts = [item[1] for item in batch_items]
-
-        batch_start = time.time()
-        print(f"\n[INFO] Starting Batch {batch_idx + 1}/{num_batches} (Samples {start_idx + 1}-{end_idx} of {total_samples})...", flush=True)
-
-        batch_outputs = engine_16b.generate(
-            batch_prompts,
-            sampling_params_thinking,
-            lora_path="adapter",
-        )
-        batch_elapsed = time.time() - batch_start
-
-        # Process batch outputs and update in-memory records
-        batch_tokens = 0
-        for b_i, rec in enumerate(batch_records):
-            out_obj = batch_outputs[b_i]
-            all_outputs.append(out_obj)
-            raw_output = extract_output_text(out_obj)
-            if raw_output:
-                batch_tokens += len(tokenizer.encode(raw_output, add_special_tokens=False))
-
-            reasoning_trace, clean_text = extract_gemma4_reasoning(raw_output)
-            metrics_16b = get_raw_metrics(clean_text)
-
-            rec_id = rec["id"]
-            if rec_id in existing_entries:
-                entry = existing_entries[rec_id]
-            else:
-                raw_user_input = extract_raw_standardsprache(text=rec.get("user", ""), doc_id=rec_id)
-                entry = {
-                    "id": rec_id,
-                    "system": rec["system"],
-                    "user_input": raw_user_input,
-                    "user_input_metrics": get_raw_metrics(raw_user_input),
-                    "user": rec["user"],
-                    "assistant": rec["assistant"],
-                    "assistant_metrics": get_raw_metrics(rec["assistant"]) if rec["assistant"] else None,
-                }
-                existing_entries[rec_id] = entry
-
-            entry["assistant_gemma4_adapter_16bit_reasoning"] = reasoning_trace
-            entry["assistant_gemma4_adapter_16bit"] = clean_text
-            entry["assistant_gemma4_adapter_16bit_metrics"] = metrics_16b
-
-            if rec["assistant"] is not None:
-                fre_16b_scores.append(metrics_16b["fre"])
-                wstf_16b_scores.append(metrics_16b["wstf"])
-
-        total_generated_tokens += batch_tokens
-        elapsed_so_far = time.time() - step5_start
-        samples_done = end_idx
-        avg_time_per_sample = elapsed_so_far / samples_done
-        samples_remaining = total_samples - samples_done
-        eta_seconds = avg_time_per_sample * samples_remaining
-        batch_speed = batch_tokens / batch_elapsed if batch_elapsed > 0 else 0.0
-        cum_speed = total_generated_tokens / elapsed_so_far if elapsed_so_far > 0 else 0.0
-
-        # Incrementally overwrite results.jsonl after every batch
-        ordered_results = [existing_entries.get(r["id"], r) for r in records]
-        with RESULTS_OUTPUT_PATH.open("w", encoding="utf-8") as f:
-            for entry in ordered_results:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-        # Incrementally update results-metadata.json after every batch
-        metadata = {}
-        if RESULTS_METADATA_PATH.exists():
-            try:
-                with RESULTS_METADATA_PATH.open("r", encoding="utf-8") as f:
-                    metadata = json.load(f)
-            except Exception:
-                metadata = {}
-
-        if not metadata:
-            metadata = {
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "total_samples": len(ordered_results),
-                "total_evaluation_time_seconds": 0.0,
-                "phase_elapsed_seconds": {},
-                "model_speeds_tokens_per_second": {},
-                "average_metrics": {},
-            }
-
-        prev_total_time = metadata.get("total_evaluation_time_seconds", 0.0) or 0.0
-        metadata["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        phase_elapsed = metadata.setdefault("phase_elapsed_seconds", {})
-        phase_elapsed["step5_adapter_16bit"] = round(elapsed_so_far, 2)
-        model_speeds = metadata.setdefault("model_speeds_tokens_per_second", {})
-        model_speeds["assistant_gemma4_adapter_16bit_speed"] = round(cum_speed, 2)
-        avg_metrics = metadata.setdefault("average_metrics", {})
-        avg_fre_16b = round(sum(fre_16b_scores) / len(fre_16b_scores), 1) if fre_16b_scores else None
-        avg_wstf_16b = round(sum(wstf_16b_scores) / len(wstf_16b_scores), 1) if wstf_16b_scores else None
-        avg_metrics["assistant_gemma4_adapter_16bit"] = {
-            "fre": avg_fre_16b,
-            "wstf": avg_wstf_16b,
-            "speed_tokens_per_sec": round(cum_speed, 2),
-        }
-
-        with RESULTS_METADATA_PATH.open("w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-
-        print(
-            f"[PROGRESS] Completed Batch {batch_idx + 1}/{num_batches} (Samples {start_idx + 1}-{end_idx}/{total_samples}) | "
-            f"Batch Time: {batch_elapsed:.1f}s ({batch_elapsed/len(batch_prompts):.1f}s/sample, {batch_speed:.1f} tok/s) | "
-            f"Total Elapsed: {elapsed_so_far/60:.1f}m | ETA: {eta_seconds/60:.1f}m (Avg: {avg_time_per_sample:.1f}s/sample)",
-            flush=True,
-        )
-
+    adapter_16bit_outputs = engine_16b.generate(
+        prompts_thinking,
+        sampling_params_thinking,
+        lora_path="adapter",
+    )
     step5_elapsed = time.time() - step5_start
-    print(f"\n[SUCCESS] Step 5/5 (16-bit LoRA) completed all {total_samples} samples in {step5_elapsed:.1f}s ({step5_elapsed/total_samples:.2f}s/sample)\n", flush=True)
+    print(f"[SUCCESS] Step 5 completed in {step5_elapsed:.1f}s ({step5_elapsed/len(records):.2f}s/sample)\n", flush=True)
 
     engine_16b.shutdown()
     del engine_16b
@@ -475,6 +348,98 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         gc.collect()
+
+    # =========================================================================
+    # Merge Results into existing results.jsonl and results-metadata.json
+    # =========================================================================
+    print("=" * 60)
+    print(f"[INFO] Merging 16-bit LoRA outputs into: {RESULTS_OUTPUT_PATH}", flush=True)
+
+    existing_entries = {}
+    all_disk_records = []
+    if RESULTS_OUTPUT_PATH.exists():
+        with RESULTS_OUTPUT_PATH.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    item = json.loads(line)
+                    existing_entries[item["id"]] = item
+                    all_disk_records.append(item)
+
+    fre_16b_scores = []
+    wstf_16b_scores = []
+
+    for idx, rec in enumerate(records):
+        raw_output = extract_output_text(adapter_16bit_outputs[idx])
+        reasoning_trace, clean_text = extract_gemma4_reasoning(raw_output)
+        metrics_16b = get_raw_metrics(clean_text)
+
+        rec_id = rec["id"]
+        if rec_id in existing_entries:
+            entry = existing_entries[rec_id]
+        else:
+            entry = dict(rec)
+            existing_entries[rec_id] = entry
+            all_disk_records.append(entry)
+
+        entry["assistant_gemma4_adapter_16bit_reasoning"] = reasoning_trace
+        entry["assistant_gemma4_adapter_16bit"] = clean_text
+        entry["assistant_gemma4_adapter_16bit_metrics"] = metrics_16b
+
+        if rec.get("assistant") is not None:
+            fre_16b_scores.append(metrics_16b["fre"])
+            wstf_16b_scores.append(metrics_16b["wstf"])
+
+    with RESULTS_OUTPUT_PATH.open("w", encoding="utf-8") as f:
+        for entry in all_disk_records:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    print(f"[SUCCESS] Wrote {len(all_disk_records)} merged evaluation samples to: {RESULTS_OUTPUT_PATH}", flush=True)
+
+    # Calculate throughput speed
+    adapter_16bit_speed = calculate_speed(adapter_16bit_outputs, step5_elapsed, tokenizer)
+
+    # Load and update metadata
+    metadata = {}
+    if RESULTS_METADATA_PATH.exists():
+        try:
+            with RESULTS_METADATA_PATH.open("r", encoding="utf-8") as f:
+                metadata = json.load(f)
+        except Exception:
+            metadata = {}
+
+    if not metadata:
+        metadata = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "total_samples": len(all_disk_records),
+            "total_evaluation_time_seconds": 0.0,
+            "phase_elapsed_seconds": {},
+            "model_speeds_tokens_per_second": {},
+            "average_metrics": {},
+        }
+
+    prev_total_time = metadata.get("total_evaluation_time_seconds", 0.0) or 0.0
+    metadata["total_evaluation_time_seconds"] = round(prev_total_time + step5_elapsed, 2)
+    metadata["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    phase_elapsed = metadata.setdefault("phase_elapsed_seconds", {})
+    phase_elapsed["step5_adapter_16bit"] = round(step5_elapsed, 2)
+
+    model_speeds = metadata.setdefault("model_speeds_tokens_per_second", {})
+    model_speeds["assistant_gemma4_adapter_16bit_speed"] = adapter_16bit_speed
+
+    avg_metrics = metadata.setdefault("average_metrics", {})
+    avg_fre_16b = round(sum(fre_16b_scores) / len(fre_16b_scores), 1) if fre_16b_scores else None
+    avg_wstf_16b = round(sum(wstf_16b_scores) / len(wstf_16b_scores), 1) if wstf_16b_scores else None
+
+    avg_metrics["assistant_gemma4_adapter_16bit"] = {
+        "fre": avg_fre_16b,
+        "wstf": avg_wstf_16b,
+        "speed_tokens_per_sec": adapter_16bit_speed,
+    }
+
+    with RESULTS_METADATA_PATH.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+    print(f"[SUCCESS] Updated evaluation metadata with 16-bit LoRA metrics to: {RESULTS_METADATA_PATH}\n", flush=True)
 
     print(f"[SUCCESS] Wrote {len(ordered_results)} merged evaluation samples to: {RESULTS_OUTPUT_PATH}")
     print(f"[SUCCESS] Wrote evaluation metadata and throughput speeds to: {RESULTS_METADATA_PATH}\n")
