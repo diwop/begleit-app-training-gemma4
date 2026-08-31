@@ -2,10 +2,10 @@
 #SBATCH --job-name=gemma4-eval-bf16
 #SBATCH --partition=small_gpu8
 #SBATCH --nodes=1
-#SBATCH --gpus=4
-#SBATCH --cpus-per-task=32
+#SBATCH --gpus=2
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
-#SBATCH --time=01:30:00
+#SBATCH --time=02:30:00
 #SBATCH --output=logs/eval_bf16_%j.log
 #SBATCH --error=logs/eval_bf16_%j-err.log
 
