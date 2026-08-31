@@ -100,172 +100,52 @@ def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
     return "", clean_text
 
 
-def get_raw_metrics(text: str) -> dict[str, float]:
-    """Calculates German textstat metrics and returns rounded raw floats."""
-    if not text or not text.strip() or textstat is None:
+def calculate_speed(outputs, elapsed_seconds: float, tokenizer) -> float:
+    """Calculate total generated tokens per second for a batch of outputs."""
+    if not outputs or elapsed_seconds <= 0:
+        return 0.0
+    total_tokens = 0
+    for out in outputs:
+        text = extract_output_text(out)
+        if text:
+            total_tokens += len(tokenizer.encode(text, add_special_tokens=False))
+    return round(total_tokens / elapsed_seconds, 2)
+
+
+def get_raw_metrics(text: str | None) -> dict[str, float]:
+    """Calculates German textstat metrics and bounds to standard ranges (FRE 0-100, WSTF 1-15)."""
+    if not text or not text.strip() or len(text.strip().split()) < 3 or textstat is None:
         return {"fre": 0.0, "wstf": 0.0}
 
     try:
-        fre = round(float(textstat.flesch_reading_ease(text)), 1)
+        raw_fre = float(textstat.flesch_reading_ease(text))
+        fre = round(max(0.0, min(100.0, raw_fre)), 1)
     except Exception:
         fre = 0.0
 
     try:
-        wstf = round(float(textstat.wiener_sachtextformel(text, 1)), 1)
+        raw_wstf = float(textstat.wiener_sachtextformel(text, 1))
+        wstf = round(max(1.0, min(15.0, raw_wstf)), 1)
     except Exception:
         wstf = 0.0
 
     return {"fre": fre, "wstf": wstf}
 
 
-def get_model_snapshot_path(model_name: str, required: bool = True) -> str:
-    """Get snapshot directory for model from Hugging Face cache or fail fast if required."""
-    if Path(model_name).exists():
-        return model_name
-
-    hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
-    repo_folder = "models--" + model_name.replace("/", "--")
-    snapshots_dir = hf_home / "hub" / repo_folder / "snapshots"
-
-    if not snapshots_dir.exists():
-        if required:
-            print(f"[ERROR] Hugging Face cache directory not found at: {snapshots_dir}", file=sys.stderr)
-            print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
-            sys.exit(1)
-        return ""
-
-    snapshots = sorted(
-        [p for p in snapshots_dir.iterdir() if p.is_dir()],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if not snapshots:
-        if required:
-            print(f"[ERROR] No snapshot directories found inside: {snapshots_dir}", file=sys.stderr)
-            print("[INFO] Please run 'bash scripts/download_models.sh' on the login node first.", file=sys.stderr)
-            sys.exit(1)
-        return ""
-
-    resolved_path = str(snapshots[0])
-    print(f"[INFO] Resolved local model snapshot: {resolved_path}")
-    return resolved_path
-
-
-def ensure_sglang_compatible_adapter(adapter_path: Path) -> None:
-    """Ensure adapter_config.json and weights are fully compatible with SGLang dynamic LoRA loading."""
-    config_file = adapter_path / "adapter_config.json"
-    if config_file.exists():
-        with config_file.open("r", encoding="utf-8") as f:
-            config = json.load(f)
-        target_modules = config.get("target_modules")
-        if isinstance(target_modules, str) and target_modules not in ("all", "all-linear"):
-            print(f"[INFO] Converting regex target_modules in {config_file} to standard list for SGLang compatibility.")
-            standard_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-            config["target_modules"] = standard_modules
-            with config_file.open("w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
-
-    # In Gemma 4 architecture, full attention layers (5, 11, 17, 23, 29) have attention_k_eq_v: true and lack v_proj.
-    # SGLang normalize_qkv_proj unconditionally expects v_proj when q_proj is present.
-    # We supply zero-initialized dummy v_proj weights (which contribute zero to output) to satisfy SGLang concatenation.
-    safetensors_file = adapter_path / "adapter_model.safetensors"
-    if safetensors_file.exists():
-        try:
-            from safetensors import safe_open
-            from safetensors.torch import save_file
-
-            tensors = {}
-            with safe_open(str(safetensors_file), framework="pt") as f:
-                for k in f.keys():
-                    tensors[k] = f.get_tensor(k)
-
-            added = 0
-            for layer_num in range(30):
-                q_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.q_proj.lora_A.weight"
-                v_a_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.v_proj.lora_A.weight"
-                v_b_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.v_proj.lora_B.weight"
-                k_a_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.k_proj.lora_A.weight"
-                k_b_k = f"base_model.model.model.language_model.layers.{layer_num}.self_attn.k_proj.lora_B.weight"
-                if q_k in tensors and v_a_k not in tensors:
-                    tensors[v_a_k] = torch.zeros_like(tensors[k_a_k])
-                    tensors[v_b_k] = torch.zeros_like(tensors[k_b_k])
-                    added += 2
-
-            if added > 0:
-                print(f"[INFO] Injected {added} zero-weight dummy v_proj tensors into {safetensors_file} for SGLang QKV alignment.")
-                save_file(tensors, str(safetensors_file))
-        except Exception as exc:
-            print(f"[WARNING] Could not check/patch safetensors file: {exc}")
-
-
-def load_eval_data(path: Path) -> list[dict[str, str]]:
-    """Load evaluation samples from JSONL."""
-    if not path.exists():
-        print(f"[ERROR] Evaluation dataset not found at {path}", file=sys.stderr)
-        print("[INFO] Run 'dvc repro' or 'python3 src-train/prepare_data.py' first.", file=sys.stderr)
-        sys.exit(1)
-
-    records = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                records.append(json.loads(line.strip()))
-    return records
-
-
-def get_integrity_checks(default_system_prompt: str) -> list[dict[str, str | None]]:
-    """Build the two initial integrity check prompts."""
-    # i001: General assistant, direct question, no prompt template
-    i001 = {
-        "id": "i001",
-        "system": "Du bist ein hilfreicher Assistent.",
-        "user": "Warum ist der Himmel blau?",
-        "assistant": None,
-    }
-
-    # i002: Standard system prompt, prompt template wrapped
-    prompt_template_path = Path("prompts/prompt-template.md")
-    if prompt_template_path.exists():
-        template = prompt_template_path.read_text(encoding="utf-8").strip()
-        i002_user = template.replace("%INPUT%", "Warum ist der Himmel blau und nicht schwarz?")
-    else:
-        i002_user = (
-            "### Text in Standardsprache:\n```input\nWarum ist der Himmel blau und nicht schwarz?\n```\n\n"
-            "### Aufgabe:\nÜbersetze den Text in Leichte Sprache. Beachte alle Regeln für Leichte Sprache."
-        )
-
-    i002 = {
-        "id": "i002",
-        "system": default_system_prompt,
-        "user": i002_user,
-        "assistant": None,
-    }
-    return [i001, i002]
-
-
-def extract_output_text(output_obj: object) -> str:
-    """Extract string response from SGLang output item."""
-    if isinstance(output_obj, dict):
-        return output_obj.get("text", "").strip()
-    if hasattr(output_obj, "text"):
-        return output_obj.text.strip()
-    return str(output_obj).strip()
-
-
 def main() -> None:
     overall_start_time = time.time()
 
     print("=" * 60)
-    print("      Gemma 4 Evaluation (Baseline, Few-Shot & Merged Adapter)")
+    print("      Gemma 4 Evaluation: FP8 Base, Few-Shot & Merged 8-bit")
     print("=" * 60)
-    print(f"[INFO] Base Model       : {BASE_MODEL_NAME}")
+    print(f"[INFO] Base FP8 Model   : {BASE_MODEL_NAME}")
     print(f"[INFO] Merged Model Path: {MERGED_MODEL_PATH}")
     print(f"[INFO] Input Dataset    : {EVAL_DATA_PATH}")
     print(f"[INFO] Output Results   : {RESULTS_OUTPUT_PATH}")
+    print(f"[INFO] Output Metadata  : {RESULTS_METADATA_PATH}")
 
     gpu_count = torch.cuda.device_count()
     tp_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
-    tensor_parallel_size = tp_size
     print(f"[INFO] Detected GPUs    : {gpu_count} (Using Tensor Parallel Size: {tp_size})")
 
     records = load_eval_data(EVAL_DATA_PATH)
@@ -280,12 +160,12 @@ def main() -> None:
         records = integrity_records + records
         print(f"[INFO] Loaded {len(records)} total evaluation samples (including {len(integrity_records)} integrity checks).")
 
-    # 1. Resolve local offline model snapshot path & Tokenizer
+    # Resolve local offline model snapshot path & Tokenizer
     model_path = get_model_snapshot_path(BASE_MODEL_NAME)
     print(f"\n[INFO] Loading tokenizer from snapshot: {model_path}")
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-    # 2. Build prompt conversations for all 3 modes
+    # Build prompt conversations for all modes
     zero_shot_conversations = [
         [
             {"role": "system", "content": rec["system"]},
@@ -347,7 +227,6 @@ def main() -> None:
         for conv in few_shot_conversations
     ]
 
-    # Sampling parameters
     sampling_params_thinking = {
         "temperature": 1.0,
         "top_p": 0.95,
@@ -355,81 +234,102 @@ def main() -> None:
         "max_new_tokens": 8192,
         "skip_special_tokens": False,
     }
-
-    # Sampling parameters
     sampling_params_no_thinking = {
         "temperature": 0.0,
         "max_new_tokens": 8192,
         "skip_special_tokens": False,
     }
 
-    # STEP 1 to 4: Temporarily commented out while validating Step 5 on full dataset
-    no_thinking_outputs = None
-    thinking_outputs = None
-    few_shot_outputs = None
+    # =========================================================================
+    # STEPS 1 to 3: Base FP8 Model (Zero-Shot, Thinking, Dynamic Few-Shot)
+    # =========================================================================
+    print("=" * 60)
+    print(f"[INFO] Initializing SGLang engine for Base FP8 Model ({BASE_MODEL_NAME})...")
+    engine = sgl.Engine(
+        model_path=model_path,
+        tp_size=tp_size,
+        trust_remote_code=True,
+        mem_fraction_static=0.85,
+        context_length=MAX_SEQUENCE_LENGTH,
+        watchdog_timeout=86400,
+        dist_timeout=7200,
+    )
+
+    # 1. Base model without thinking
+    print("=" * 60)
+    print(f"[STEP 1/4] Running Base Model WITHOUT thinking (enable_thinking=False, T=0.0) for {len(records)} samples...")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    step1_start = time.time()
+    no_thinking_outputs = engine.generate(prompts_no_thinking, sampling_params_no_thinking)
+    step1_elapsed = time.time() - step1_start
+    print(f"[SUCCESS] Step 1/4 (Zero-Shot) completed in {step1_elapsed:.1f}s ({step1_elapsed/len(records):.2f}s/sample)\n")
+
+    # 2. Base model with thinking
+    print("=" * 60)
+    print(f"[STEP 2/4] Running Base Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    step2_start = time.time()
+    thinking_outputs = engine.generate(prompts_thinking, sampling_params_thinking)
+    step2_elapsed = time.time() - step2_start
+    print(f"[SUCCESS] Step 2/4 (With Thinking) completed in {step2_elapsed:.1f}s ({step2_elapsed/len(records):.2f}s/sample)\n")
+
+    # 3. Base model with dynamic few shots and thinking
+    print("=" * 60)
+    print(f"[STEP 3/4] Running Base Model WITH Dynamic Few-Shots & thinking for {len(records)} samples...")
+    print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    step3_start = time.time()
+    few_shot_outputs = engine.generate(prompts_few_shots, sampling_params_thinking)
+    step3_elapsed = time.time() - step3_start
+    print(f"[SUCCESS] Step 3/4 (Few-Shots + Thinking) completed in {step3_elapsed:.1f}s ({step3_elapsed/len(records):.2f}s/sample)\n")
+
+    engine.shutdown()
+    del engine
+    time.sleep(3)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
+
+    # =========================================================================
+    # STEP 4: Fine-Tuned Merged 8-bit Model Evaluation
+    # =========================================================================
     merged_adapter_8bit_outputs = None
-    print("\n[INFO] Steps 1-4 commented out. Executing Phase 5 (16-bit Base Model + Unmerged LoRA Adapter) on full dataset.")
-
-    # STEP 5: Fine-Tuned 16-bit Base Model + Unmerged LoRA Adapter Evaluation
-    adapter_16bit_outputs = None
-    base_16b_path = get_model_snapshot_path(BASE_16B_MODEL_NAME, required=False)
-
-    if ADAPTER_DIR.exists() and base_16b_path and gpu_count >= 2:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            gc.collect()
-
-        # Ensure adapter config and weights are compatible with SGLang dynamic LoRA
-        ensure_sglang_compatible_adapter(ADAPTER_DIR)
-
-        # Tensor Parallel size for 16-bit 26B model: requires 2 GPUs (TP=2) for 52 GB model in 96 GB VRAM
-        tp_size_16b = 2 if gpu_count in (2, 3) else min(gpu_count, 4)
+    step4_elapsed = None
+    if MERGED_MODEL_PATH.exists():
         print("=" * 60)
-        print(f"[INFO] Initializing SGLang engine with 16-bit Base Model ({BASE_16B_MODEL_NAME}) + Unmerged LoRA ({ADAPTER_DIR})")
-        print(f"[INFO] Using Tensor Parallel Size: {tp_size_16b} (available GPUs: {gpu_count})")
-
-        engine_16b = sgl.Engine(
-            model_path=base_16b_path,
-            tp_size=tp_size_16b,
+        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Merged 8-bit Model ({MERGED_MODEL_PATH})...")
+        merged_engine = sgl.Engine(
+            model_path=str(MERGED_MODEL_PATH),
+            tp_size=tp_size,
             trust_remote_code=True,
             mem_fraction_static=0.85,
             context_length=MAX_SEQUENCE_LENGTH,
-            enable_lora=True,
-            lora_paths={"adapter": str(ADAPTER_DIR)},
-            max_loras_per_batch=1,
-            max_lora_rank=64,
-            disable_cuda_graph=True,
             watchdog_timeout=86400,
             dist_timeout=7200,
         )
 
         print("=" * 60)
-        print(f"[STEP 5/5] Running 16-bit Base Model + Unmerged LoRA Adapter WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
+        print(f"[STEP 4/4] Running Fine-Tuned Merged 8-bit Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
         print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        step5_start = time.time()
+        step4_start = time.time()
 
-        adapter_16bit_outputs = engine_16b.generate(
-            prompts_thinking,
-            sampling_params_thinking,
-            lora_path="adapter",
-        )
+        merged_adapter_8bit_outputs = merged_engine.generate(prompts_thinking, sampling_params_thinking)
 
-        step5_elapsed = time.time() - step5_start
-        print(f"[SUCCESS] Step 5 completed in {step5_elapsed:.1f}s ({step5_elapsed/len(records):.2f}s/sample)\n")
+        step4_elapsed = time.time() - step4_start
+        print(f"[SUCCESS] Step 4/4 (Merged 8-bit + Think) completed in {step4_elapsed:.1f}s ({step4_elapsed/len(records):.2f}s/sample)\n")
 
-        engine_16b.shutdown()
+        merged_engine.shutdown()
+        del merged_engine
+        time.sleep(3)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
     else:
         print("=" * 60)
-        if gpu_count < 2:
-            print(f"[INFO] [STEP 5/5] Skipping 16-bit Unmerged LoRA evaluation: requires at least 2 GPUs for 52 GB model (detected {gpu_count} GPU).")
-            print("[INFO] Set '#SBATCH --gpus=2' or '--gpus=3' in your submission script to enable 16-bit evaluation.")
-        elif not ADAPTER_DIR.exists():
-            print(f"[INFO] [STEP 5/5] LoRA adapter not found at '{ADAPTER_DIR}'. Skipping Pass 5.")
-        elif not base_16b_path:
-            print(f"[INFO] [STEP 5/5] 16-bit base model '{BASE_16B_MODEL_NAME}' snapshot not found in cache. Skipping Pass 5.")
-        print()
+        print(f"[INFO] [STEP 4/4] Fine-tuned merged model not found at '{MERGED_MODEL_PATH}'. Skipping Pass 4.\n")
 
-    # 5. Calculate metrics and assemble results
+    # =========================================================================
+    # Assemble Results & Calculate Readability Metrics
+    # =========================================================================
     print("=" * 60)
     print(f"[INFO] Calculating German readability metrics (FRE & WSTF)...")
     RESULTS_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -442,7 +342,6 @@ def main() -> None:
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
         "gemma4_merged_adapter_8bit": [],
-        "gemma4_adapter_16bit": [],
     }
     wstf_scores = {
         "input": [],
@@ -451,7 +350,6 @@ def main() -> None:
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
         "gemma4_merged_adapter_8bit": [],
-        "gemma4_adapter_16bit": [],
     }
 
     for idx, rec in enumerate(records):
@@ -498,15 +396,6 @@ def main() -> None:
             merged_adapter_8bit_reasoning, out_merged_adapter_8bit = extract_gemma4_reasoning(raw_merged_8bit)
             gemma4_merged_adapter_8bit_metrics = get_raw_metrics(out_merged_adapter_8bit)
 
-        out_adapter_16bit = None
-        adapter_16bit_reasoning = None
-        gemma4_adapter_16bit_metrics = None
-
-        if adapter_16bit_outputs is not None:
-            raw_adapter_16bit = extract_output_text(adapter_16bit_outputs[idx])
-            adapter_16bit_reasoning, out_adapter_16bit = extract_gemma4_reasoning(raw_adapter_16bit)
-            gemma4_adapter_16bit_metrics = get_raw_metrics(out_adapter_16bit)
-
         if assistant_metrics is not None:
             fre_scores["input"].append(user_metrics["fre"])
             fre_scores["ground_truth"].append(assistant_metrics["fre"])
@@ -518,8 +407,6 @@ def main() -> None:
                 fre_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["fre"])
             if gemma4_merged_adapter_8bit_metrics is not None:
                 fre_scores["gemma4_merged_adapter_8bit"].append(gemma4_merged_adapter_8bit_metrics["fre"])
-            if gemma4_adapter_16bit_metrics is not None:
-                fre_scores["gemma4_adapter_16bit"].append(gemma4_adapter_16bit_metrics["fre"])
 
             wstf_scores["input"].append(user_metrics["wstf"])
             wstf_scores["ground_truth"].append(assistant_metrics["wstf"])
@@ -531,8 +418,6 @@ def main() -> None:
                 wstf_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["wstf"])
             if gemma4_merged_adapter_8bit_metrics is not None:
                 wstf_scores["gemma4_merged_adapter_8bit"].append(gemma4_merged_adapter_8bit_metrics["wstf"])
-            if gemma4_adapter_16bit_metrics is not None:
-                wstf_scores["gemma4_adapter_16bit"].append(gemma4_adapter_16bit_metrics["wstf"])
 
         result_entry = {
             "id": rec["id"],
@@ -554,9 +439,9 @@ def main() -> None:
             "assistant_gemma4_merged_adapter_8bit_reasoning": merged_adapter_8bit_reasoning,
             "assistant_gemma4_merged_adapter_8bit": out_merged_adapter_8bit,
             "assistant_gemma4_merged_adapter_8bit_metrics": gemma4_merged_adapter_8bit_metrics,
-            "assistant_gemma4_adapter_16bit_reasoning": adapter_16bit_reasoning,
-            "assistant_gemma4_adapter_16bit": out_adapter_16bit,
-            "assistant_gemma4_adapter_16bit_metrics": gemma4_adapter_16bit_metrics,
+            "assistant_gemma4_adapter_16bit_reasoning": None,
+            "assistant_gemma4_adapter_16bit": None,
+            "assistant_gemma4_adapter_16bit_metrics": None,
         }
         results.append(result_entry)
 
@@ -600,13 +485,73 @@ def main() -> None:
             avg_g4_merged_8bit_wstf = sum(wstf_scores["gemma4_merged_adapter_8bit"]) / len(wstf_scores["gemma4_merged_adapter_8bit"])
             print(f"  * Gemma 4 (Merged 8-bit + Think): FRE = {avg_g4_merged_8bit_fre:.1f}  |  WSTF = {avg_g4_merged_8bit_wstf:.1f}")
 
-        if fre_scores["gemma4_adapter_16bit"]:
-            avg_g4_16b_fre = sum(fre_scores["gemma4_adapter_16bit"]) / len(fre_scores["gemma4_adapter_16bit"])
-            avg_g4_16b_wstf = sum(wstf_scores["gemma4_adapter_16bit"]) / len(wstf_scores["gemma4_adapter_16bit"])
-            print(f"  * Gemma 4 (16-bit LoRA + Think) : FRE = {avg_g4_16b_fre:.1f}  |  WSTF = {avg_g4_16b_wstf:.1f}")
-
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
+
+    # Calculate throughput speeds and write results-metadata.json
+    assistant_gemma4_speed = calculate_speed(no_thinking_outputs, step1_elapsed or 0, tokenizer)
+    assistant_gemma4_thinking_speed = calculate_speed(thinking_outputs, step2_elapsed or 0, tokenizer)
+    assistant_gemma4_dynamic_few_shots_speed = calculate_speed(few_shot_outputs, step3_elapsed or 0, tokenizer)
+    assistant_gemma4_merged_adapter_8bit_speed = calculate_speed(merged_adapter_8bit_outputs, step4_elapsed or 0, tokenizer)
+
+    metadata = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "total_samples": len(results),
+        "total_evaluation_time_seconds": round(overall_elapsed, 2),
+        "phase_elapsed_seconds": {
+            "step1_base_zero_shot": round(step1_elapsed, 2) if step1_elapsed is not None else None,
+            "step2_base_thinking": round(step2_elapsed, 2) if step2_elapsed is not None else None,
+            "step3_base_few_shots": round(step3_elapsed, 2) if step3_elapsed is not None else None,
+            "step4_merged_adapter_8bit": round(step4_elapsed, 2) if step4_elapsed is not None else None,
+            "step5_adapter_16bit": None,
+        },
+        "model_speeds_tokens_per_second": {
+            "assistant_gemma4_speed": assistant_gemma4_speed,
+            "assistant_gemma4_thinking_speed": assistant_gemma4_thinking_speed,
+            "assistant_gemma4_dynamic_few_shots_speed": assistant_gemma4_dynamic_few_shots_speed,
+            "assistant_gemma4_merged_adapter_8bit_speed": assistant_gemma4_merged_adapter_8bit_speed,
+            "assistant_gemma4_adapter_16bit_speed": None,
+        },
+        "average_metrics": {
+            "input_standardsprache": {
+                "fre": round(avg_in_fre, 1) if num_eval_ds > 0 else None,
+                "wstf": round(avg_in_wstf, 1) if num_eval_ds > 0 else None,
+            },
+            "ground_truth": {
+                "fre": round(avg_gt_fre, 1) if num_eval_ds > 0 else None,
+                "wstf": round(avg_gt_wstf, 1) if num_eval_ds > 0 else None,
+            },
+            "assistant_gemma4": {
+                "fre": round(avg_g4_fre, 1) if fre_scores["gemma4"] else None,
+                "wstf": round(avg_g4_wstf, 1) if wstf_scores["gemma4"] else None,
+                "speed_tokens_per_sec": assistant_gemma4_speed,
+            },
+            "assistant_gemma4_thinking": {
+                "fre": round(avg_g4_think_fre, 1) if fre_scores["gemma4_thinking"] else None,
+                "wstf": round(avg_g4_think_wstf, 1) if wstf_scores["gemma4_thinking"] else None,
+                "speed_tokens_per_sec": assistant_gemma4_thinking_speed,
+            },
+            "assistant_gemma4_dynamic_few_shots": {
+                "fre": round(avg_g4_few_fre, 1) if fre_scores["gemma4_dynamic_few_shots"] else None,
+                "wstf": round(avg_g4_few_wstf, 1) if wstf_scores["gemma4_dynamic_few_shots"] else None,
+                "speed_tokens_per_sec": assistant_gemma4_dynamic_few_shots_speed,
+            },
+            "assistant_gemma4_merged_adapter_8bit": {
+                "fre": round(avg_g4_merged_8bit_fre, 1) if fre_scores["gemma4_merged_adapter_8bit"] else None,
+                "wstf": round(avg_g4_merged_8bit_wstf, 1) if wstf_scores["gemma4_merged_adapter_8bit"] else None,
+                "speed_tokens_per_sec": assistant_gemma4_merged_adapter_8bit_speed,
+            },
+            "assistant_gemma4_adapter_16bit": {
+                "fre": None,
+                "wstf": None,
+                "speed_tokens_per_sec": None,
+            },
+        },
+    }
+
+    with RESULTS_METADATA_PATH.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+    print(f"[SUCCESS] Wrote evaluation metadata and throughput speeds to: {RESULTS_METADATA_PATH}\n")
 
 
 if __name__ == "__main__":
