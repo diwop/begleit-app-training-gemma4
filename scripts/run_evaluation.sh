@@ -51,6 +51,9 @@ apptainer exec \
   --env WANDB_MODE=offline \
   --env ANONYMIZED_TELEMETRY=False \
   --env DISABLE_TELEMETRY=1 \
+  --env NCCL_P2P_DISABLE=1 \
+  --env NCCL_IB_DISABLE=1 \
+  --env TORCH_NCCL_BLOCKING_WAIT=1 \
   --env PYTHONUSERBASE="${HOME}/.local" \
   --env PYTHONNOUSERSITE=0 \
   --env PYTHONUNBUFFERED=1 \
