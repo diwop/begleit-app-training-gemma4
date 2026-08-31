@@ -305,16 +305,10 @@ def main() -> None:
     print("=" * 60)
     print(f"[INFO] Initializing SGLang engine with 16-bit Base Model ({BASE_16B_MODEL_NAME}) + Unmerged LoRA ({ADAPTER_DIR})")
     print(f"[INFO] Fresh process with clean GPU VRAM (TP={tp_size_16b}, GPUs={gpu_count})")
-    # Allocate dynamic collision-free ports
-    server_port = find_free_port()
-    nccl_port = find_free_port()
-    print(f"[INFO] Allocated dynamic SGLang server port: {server_port}, NCCL port: {nccl_port}", flush=True)
-
     init_start = time.time()
     engine_16b = sgl.Engine(
         model_path=base_16b_path,
         tp_size=tp_size_16b,
-        port=server_port,
         trust_remote_code=True,
         mem_fraction_static=0.85,
         context_length=MAX_SEQUENCE_LENGTH,
