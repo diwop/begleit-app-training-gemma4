@@ -291,9 +291,11 @@ def main() -> None:
 
     print(f"\n[INFO] Constructing Dynamic Few-Shot prompts with token budget (max input: {MAX_INPUT_TOKENS} tokens)...")
     few_shot_conversations = []
+    few_shot_examples_per_sample = []
     for rec in records:
         if rec["id"] in ("i001", "i002"):
             few_shot_user_prompt = rec["user"]
+            fitting_examples = []
         else:
             raw_user_in = extract_raw_standardsprache(text=rec.get("user", ""), doc_id=rec["id"])
             fitting_examples = get_fitting_few_shot_examples(
@@ -307,6 +309,7 @@ def main() -> None:
             token_count = len(tokenizer.encode(few_shot_user_prompt, add_special_tokens=False))
             print(f"[INFO] Sample '{rec['id']}': retrieved {len(fitting_examples)} few-shot demonstrations ({token_count} tokens).")
 
+        few_shot_examples_per_sample.append(fitting_examples)
         few_shot_conversations.append([
             {"role": "system", "content": rec["system"]},
             {"role": "user", "content": few_shot_user_prompt},
@@ -534,6 +537,12 @@ def main() -> None:
             if gemma4_merged_adapter_8bit_metrics is not None:
                 wstf_scores["gemma4_merged_adapter_8bit"].append(gemma4_merged_adapter_8bit_metrics["wstf"])
 
+        examples = few_shot_examples_per_sample[idx]
+        fewshot1_original = examples[0]["user_input"] if len(examples) > 0 else None
+        fewshot1_assistant = examples[0]["assistant"] if len(examples) > 0 else None
+        fewshot2_original = examples[1]["user_input"] if len(examples) > 1 else None
+        fewshot2_assistant = examples[1]["assistant"] if len(examples) > 1 else None
+
         result_entry = {
             "id": rec["id"],
             "system": rec["system"],
@@ -541,6 +550,10 @@ def main() -> None:
             "user_input_metrics": user_metrics,
             "user": rec["user"],
             "user_dynamic_few_shots": few_shot_conversations[idx][1]["content"],
+            "fewshot1_original": fewshot1_original,
+            "fewshot1_assistant": fewshot1_assistant,
+            "fewshot2_original": fewshot2_original,
+            "fewshot2_assistant": fewshot2_assistant,
             "assistant": rec["assistant"],
             "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,
