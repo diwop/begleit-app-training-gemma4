@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=gemma4-eval
 #SBATCH --partition=small_gpu8
-#SBATCH --gpus=1
+#SBATCH --nodes=1
+#SBATCH --gpus=2
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=120G
 #SBATCH --time=01:00:00
 #SBATCH --output=logs/eval_%j.log
 #SBATCH --error=logs/eval_%j-err.log

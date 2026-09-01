@@ -295,6 +295,8 @@ Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using *
 1. **Standard Zero-Shot Translation** (`enable_thinking=False`, $T=0.0$)
 2. **Thinking-Enabled Zero-Shot Translation** (`enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
 3. **Dynamic Few-Shot Translation with Thinking** ($k=2$ retrieved examples from training set via `multilingual-e5-base`, `enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
+4. **Fine-Tuned Merged FP8 Model with Thinking** (`enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
+5. **Fine-Tuned 16-bit Base Model with Unmerged LoRA Adapter** (`enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$, requires $\ge 2$ GPUs)
 
 Produces `data/results.jsonl` with German textstat readability metrics (`fre` = Flesch Reading Ease, `wstf` = Wiener Sachtextformel):
 ```json
@@ -314,7 +316,13 @@ Produces `data/results.jsonl` with German textstat readability metrics (`fre` = 
   "assistant_gemma4_thinking_metrics": { "fre": 85.3, "wstf": 4.6 },
   "assistant_gemma4_dynamic_few_shots_reasoning": "<few-shots reasoning trace>",
   "assistant_gemma4_dynamic_few_shots": "<gemma4 output with few-shots and thinking>",
-  "assistant_gemma4_dynamic_few_shots_metrics": { "fre": 87.1, "wstf": 4.2 }
+  "assistant_gemma4_dynamic_few_shots_metrics": { "fre": 87.1, "wstf": 4.2 },
+  "assistant_gemma4_merged_adapter_8bit_reasoning": "<merged 8-bit adapter reasoning trace>",
+  "assistant_gemma4_merged_adapter_8bit": "<merged 8-bit adapter output with thinking>",
+  "assistant_gemma4_merged_adapter_8bit_metrics": { "fre": 89.2, "wstf": 3.9 },
+  "assistant_gemma4_adapter_16bit_reasoning": "<16-bit unmerged adapter reasoning trace>",
+  "assistant_gemma4_adapter_16bit": "<16-bit unmerged adapter output with thinking>",
+  "assistant_gemma4_adapter_16bit_metrics": { "fre": 89.8, "wstf": 3.8 }
 }
 ```
 
@@ -428,7 +436,7 @@ sbatch scripts/submit_training.sbatch
 Run the 5-pass evaluation on the evaluation split using SGLang:
 ```bash
 sbatch scripts/submit_evaluation.sbatch
-# Or interactively:
+# Or interactively on multi-GPU node:
 # bash scripts/run_evaluation.sh
 ```
 
@@ -436,5 +444,5 @@ The script evaluates:
 1. Base Model Zero-Shot (`enable_thinking=False`)
 2. Base Model Zero-Shot WITH Thinking (`enable_thinking=True`)
 3. Base Model Dynamic Few-Shot WITH Thinking
-4. Fine-Tuned Merged FP8 Model WITHOUT Thinking (`enable_thinking=False`)
-5. Fine-Tuned Merged FP8 Model WITH Thinking (`enable_thinking=True`)
+4. Fine-Tuned Merged FP8 Model WITH Thinking (`enable_thinking=True`)
+5. Fine-Tuned 16-bit Base Model with Unmerged LoRA Adapter WITH Thinking (`enable_thinking=True`, requires $\ge 2$ GPUs)
