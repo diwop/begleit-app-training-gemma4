@@ -41,7 +41,7 @@ FEW_SHOT_TEMPLATE_PATH = Path(
 )
 
 
-def get_model_snapshot_path(model_name: str) -> str:
+def get_model_snapshot_path(model_name: str, required: bool = True) -> str:
     """Resolve model repo ID to local disk snapshot directory or fail fast."""
     if Path(model_name).exists():
         return model_name
@@ -53,15 +53,17 @@ def get_model_snapshot_path(model_name: str) -> str:
     snapshots_dir = hf_home / "hub" / repo_folder / "snapshots"
 
     if not snapshots_dir.exists():
-        print(
-            f"[ERROR] Embedding model cache directory not found at: {snapshots_dir}",
-            file=sys.stderr,
-        )
-        print(
-            "[INFO] Please run 'bash scripts/download_models.sh' on the login node first.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        if required:
+            print(
+                f"[ERROR] Embedding model cache directory not found at: {snapshots_dir}",
+                file=sys.stderr,
+            )
+            print(
+                "[INFO] Please run 'bash scripts/download_models.sh' on the login node first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return ""
 
     snapshots = sorted(
         [p for p in snapshots_dir.iterdir() if p.is_dir()],
@@ -69,11 +71,17 @@ def get_model_snapshot_path(model_name: str) -> str:
         reverse=True,
     )
     if not snapshots:
-        print(
-            f"[ERROR] No snapshot directories found inside: {snapshots_dir}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        if required:
+            print(
+                f"[ERROR] No snapshot directories found inside: {snapshots_dir}",
+                file=sys.stderr,
+            )
+            print(
+                "[INFO] Please run 'bash scripts/download_models.sh' on the login node first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return ""
 
     return str(snapshots[0])
 
@@ -263,7 +271,9 @@ def build_dynamic_few_shot_user_prompt(
         sections.append(
             f"### Beispiel {i}:\n"
             f"Bisheriger Dialog:\n{ex_hist}\n\n"
-            f"```input\n{ex_in}\n```\n"
+            f"#### Eingabe: Standardsprache\n"
+            f"```input\n{ex_in}\n```\n\n"
+            f"#### Ausgabe: Übersetzung in Leichte Sprache\n"
             f"```output\n{ex_out}\n```\n"
         )
 

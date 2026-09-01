@@ -124,6 +124,8 @@ def get_raw_metrics(text: str | None) -> dict[str, float]:
     except Exception:
         wstf = 0.0
 
+    return {"fre": fre, "wstf": wstf}
+
 def get_model_snapshot_path(model_name: str, required: bool = True) -> str:
     """Get snapshot directory for model from Hugging Face cache or fail fast if required."""
     if Path(model_name).exists():

@@ -35,7 +35,26 @@ if [ ! -d "${SGLANG_CONTAINER_DIR}" ]; then
   exit 1
 fi
 
-mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local"
+# Configure local fast SSD scratch via SLURM_TMPDIR if available (auto-cleaned by Slurm)
+LOCAL_SCRATCH_ARGS=()
+if [ -n "${SLURM_TMPDIR:-}" ] && [ -d "${SLURM_TMPDIR}" ]; then
+  SCRATCH_ROOT="${SLURM_TMPDIR}/${SLURM_JOB_ID:-eval_scratch_dialogs}"
+  mkdir -p "${SCRATCH_ROOT}/tmp" "${SCRATCH_ROOT}/triton" "${SCRATCH_ROOT}/torch_ext"
+  echo "[INFO] Local Scratch   : ${SCRATCH_ROOT} (NVMe SSD $SLURM_TMPDIR)"
+  LOCAL_SCRATCH_ARGS=(
+    --bind "${SCRATCH_ROOT}:/scratch_local"
+    --bind "${SCRATCH_ROOT}/tmp:/tmp"
+    --env TMPDIR="/scratch_local/tmp"
+    --env TRITON_CACHE_DIR="/scratch_local/triton"
+    --env TORCH_EXTENSIONS_DIR="/scratch_local/torch_ext"
+  )
+else
+  echo "[INFO] Local Scratch   : Using default /tmp (SLURM_TMPDIR not set)"
+  LOCAL_SCRATCH_ARGS=(
+    --bind "/tmp:/tmp"
+    --env TMPDIR="/tmp"
+  )
+fi
 
 # Execute evaluation_dialogs.py inside the SGLang container in offline mode
 apptainer exec \
@@ -51,9 +70,14 @@ apptainer exec \
   --env WANDB_MODE=offline \
   --env ANONYMIZED_TELEMETRY=False \
   --env DISABLE_TELEMETRY=1 \
+  --env NCCL_P2P_DISABLE=1 \
+  --env NCCL_IB_DISABLE=1 \
+  --env TORCH_NCCL_BLOCKING_WAIT=1 \
   --env PYTHONUSERBASE="${HOME}/.local" \
   --env PYTHONNOUSERSITE=0 \
+  --env PYTHONUNBUFFERED=1 \
   --env PYTHONPATH="/repo/src-eval:${HOME}/.local/lib/python3.12/site-packages:${HOME}/.local/lib/python3.11/site-packages:${PYTHONPATH:-}" \
+  "${LOCAL_SCRATCH_ARGS[@]}" \
   --bind "${WORKSPACE_ROOT}:/repo" \
   --bind "${HF_CACHE_DIR}:${HF_CACHE_DIR}" \
   --bind "${HF_CACHE_DIR}:/root/.cache/huggingface" \
