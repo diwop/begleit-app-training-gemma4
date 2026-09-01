@@ -61,12 +61,40 @@ def get_model_snapshot_path(model_name: str) -> str:
     return str(snapshots[0])
 
 
+import re
+
+
+def extract_raw_standardsprache(text: str = "", doc_id: str = "", raw_dir: Path = DEFAULT_RAW_DIR) -> str:
+    """
+    Extract the clean Standardsprache text without prompt template wrapper.
+    1. Checks data/raw/{id}_Standardsprache.txt on disk first if doc_id is provided.
+    2. Otherwise parses out the contents inside the ```input ... ``` block from text.
+    3. If no ```input block is found, strips and returns text.
+    """
+    if doc_id:
+        raw_file = Path(raw_dir) / f"{doc_id}_Standardsprache.txt"
+        if raw_file.exists():
+            content = raw_file.read_text(encoding="utf-8").strip()
+            if content:
+                return content
+
+    if not text:
+        return ""
+
+    match = re.search(r"```input\s*\n(.*?)\n```", text, flags=re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    match = re.search(r"```input\s*\n(.*?)```", text, flags=re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    return text.strip()
+
+
 def load_raw_standardsprache(doc_id: str, raw_dir: Path = DEFAULT_RAW_DIR) -> str:
-    """Load raw Standardsprache text from data/raw/{id}_Standardsprache.txt."""
-    raw_file = raw_dir / f"{doc_id}_Standardsprache.txt"
-    if raw_file.exists():
-        return raw_file.read_text(encoding="utf-8").strip()
-    return ""
+    """Load raw Standardsprache text from data/raw/{id}_Standardsprache.txt if it exists."""
+    return extract_raw_standardsprache(doc_id=doc_id, raw_dir=raw_dir)
 
 
 class DynamicFewShotIndex:
@@ -113,10 +141,9 @@ class DynamicFewShotIndex:
                 record = json.loads(line.strip())
                 doc_id = record.get("id", "")
                 assistant = record.get("assistant", "").strip()
+                user_content = record.get("user", "").strip()
 
-                raw_input = load_raw_standardsprache(doc_id, self.raw_dir)
-                if not raw_input:
-                    raw_input = record.get("user", "").strip()
+                raw_input = extract_raw_standardsprache(text=user_content, doc_id=doc_id, raw_dir=self.raw_dir)
 
                 entry = {
                     "id": doc_id,
