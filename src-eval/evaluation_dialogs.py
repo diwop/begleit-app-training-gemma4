@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
 Runs baseline, dynamic few-shot, and fine-tuned merged adapter evaluation for Gemma 4 26B-A4B on data/dataset_eval_dialogs.jsonl using SGLang.
-Evaluates the model across five techniques:
+Evaluates the model across four techniques:
 1. Standard zero-shot generation on base model (without thinking: enable_thinking=False)
 2. Thinking-enabled generation on base model (with thinking: enable_thinking=True, T=1.0, top_p=0.95, top_k=64)
 3. Dynamic Few-Shot generation on base model (2 semantically closest training examples retrieved via multilingual-e5-base)
-4. Fine-Tuned Merged Adapter generation WITHOUT thinking (enable_thinking=False)
-5. Fine-Tuned Merged Adapter generation WITH thinking (enable_thinking=True, T=1.0, top_p=0.95, top_k=64)
+4. Fine-Tuned Merged 8-bit Adapter generation WITH thinking (enable_thinking=True, T=1.0, top_p=0.95, top_k=64)
 
-Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts.
+Calculates German readability metrics (FRE and WSTF) via textstat for all I/O texts and writes results_dialogs-metadata.json with speeds and phase timings.
 """
 
 from __future__ import annotations
@@ -68,7 +67,7 @@ MAX_SEQUENCE_LENGTH = 32768
 MAX_NEW_TOKENS = 8192
 MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
-# Default to 0 (evaluate entire dataset_eval_dialogs.jsonl). Set MAX_EVAL_SAMPLES > 0 for quick smoke subsets.
+# Default to 0 for full dataset evaluation. Set MAX_EVAL_SAMPLES > 0 for quick smoke subsets.
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
 
 BASE_MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
@@ -81,6 +80,11 @@ EVAL_DATA_PATH = Path("data/dataset_eval_dialogs.jsonl")
 TRAIN_DATA_PATH = Path("data/dataset_train_dialogs.jsonl")
 RESULTS_OUTPUT_PATH = Path(
     os.environ.get("EVAL_RESULTS_OUTPUT", "data/results_dialogs.jsonl")
+)
+RESULTS_METADATA_PATH = Path(
+    os.environ.get(
+        "EVAL_METADATA_OUTPUT", "data/results_dialogs-metadata.json"
+    )
 )
 
 
@@ -111,26 +115,47 @@ def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
     return "", clean_text
 
 
-def get_raw_metrics(text: str) -> dict[str, float]:
-    """Calculates German textstat metrics and returns rounded raw floats."""
-    if not text or not text.strip() or textstat is None:
+def calculate_speed(outputs, elapsed_seconds: float, tokenizer) -> float:
+    """Calculate total generated tokens per second for a batch of outputs."""
+    if not outputs or elapsed_seconds <= 0:
+        return 0.0
+    total_tokens = 0
+    for out in outputs:
+        text = extract_output_text(out)
+        if text:
+            total_tokens += len(
+                tokenizer.encode(text, add_special_tokens=False)
+            )
+    return round(total_tokens / elapsed_seconds, 2)
+
+
+def get_raw_metrics(text: str | None) -> dict[str, float]:
+    """Calculates German textstat metrics and bounds to standard ranges (FRE 0-100, WSTF 1-15)."""
+    if (
+        not text
+        or not text.strip()
+        or len(text.strip().split()) < 3
+        or textstat is None
+    ):
         return {"fre": 0.0, "wstf": 0.0}
 
     try:
-        fre = round(float(textstat.flesch_reading_ease(text)), 1)
+        raw_fre = float(textstat.flesch_reading_ease(text))
+        fre = round(max(0.0, min(100.0, raw_fre)), 1)
     except Exception:
         fre = 0.0
 
     try:
-        wstf = round(float(textstat.wiener_sachtextformel(text, 1)), 1)
+        raw_wstf = float(textstat.wiener_sachtextformel(text, 1))
+        wstf = round(max(1.0, min(15.0, raw_wstf)), 1)
     except Exception:
         wstf = 0.0
 
     return {"fre": fre, "wstf": wstf}
 
 
-def get_model_snapshot_path(model_name: str) -> str:
-    """Get snapshot directory for model from Hugging Face cache or fail fast."""
+def get_model_snapshot_path(model_name: str, required: bool = True) -> str:
+    """Get snapshot directory for model from Hugging Face cache or fail fast if required."""
     if Path(model_name).exists():
         return model_name
 
@@ -141,16 +166,17 @@ def get_model_snapshot_path(model_name: str) -> str:
     snapshots_dir = hf_home / "hub" / repo_folder / "snapshots"
 
     if not snapshots_dir.exists():
-        print(
-            f"[ERROR] Hugging Face cache directory not found at: {snapshots_dir}",
-            file=sys.stderr,
-        )
-        print(
-            "[INFO] Please run 'bash scripts/download_models.sh' on the login"
-            " node first.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        if required:
+            print(
+                f"[ERROR] Hugging Face cache directory not found at: {snapshots_dir}",
+                file=sys.stderr,
+            )
+            print(
+                "[INFO] Please run 'bash scripts/download_models.sh' on the login node first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return ""
 
     snapshots = sorted(
         [p for p in snapshots_dir.iterdir() if p.is_dir()],
@@ -158,16 +184,17 @@ def get_model_snapshot_path(model_name: str) -> str:
         reverse=True,
     )
     if not snapshots:
-        print(
-            f"[ERROR] No snapshot directories found inside: {snapshots_dir}",
-            file=sys.stderr,
-        )
-        print(
-            "[INFO] Please run 'bash scripts/download_models.sh' on the login"
-            " node first.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        if required:
+            print(
+                f"[ERROR] No snapshot directories found inside: {snapshots_dir}",
+                file=sys.stderr,
+            )
+            print(
+                "[INFO] Please run 'bash scripts/download_models.sh' on the login node first.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return ""
 
     resolved_path = str(snapshots[0])
     print(f"[INFO] Resolved local model snapshot: {resolved_path}")
@@ -257,6 +284,7 @@ def main() -> None:
     print(f"[INFO] Merged Model Path: {MERGED_MODEL_PATH}")
     print(f"[INFO] Input Dataset    : {EVAL_DATA_PATH}")
     print(f"[INFO] Output Results   : {RESULTS_OUTPUT_PATH}")
+    print(f"[INFO] Output Metadata  : {RESULTS_METADATA_PATH}")
 
     gpu_count = torch.cuda.device_count()
     tensor_parallel_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
@@ -307,9 +335,11 @@ def main() -> None:
         f" input: {MAX_INPUT_TOKENS} tokens)..."
     )
     few_shot_conversations = []
+    few_shot_examples_per_sample = []
     for rec in records:
         if rec["id"] in ("i001", "i002"):
             few_shot_user_prompt = rec["user"]
+            fitting_examples = []
         else:
             raw_user_in = rec.get("user_input", "") or rec["user"]
             history_in = rec.get("history", "keine Historie")
@@ -333,6 +363,7 @@ def main() -> None:
                 f" ({token_count} tokens)."
             )
 
+        few_shot_examples_per_sample.append(fitting_examples)
         few_shot_conversations.append([
             {"role": "system", "content": rec["system"]},
             {"role": "user", "content": few_shot_user_prompt},
@@ -462,19 +493,19 @@ def main() -> None:
         f" ({step3_elapsed/len(records):.2f}s/sample)\n"
     )
 
-    # STEP 4 & 5: Fine-Tuned Merged Adapter Evaluation
-    merged_outputs = None
-    merged_thinking_outputs = None
+    engine.shutdown()
+
+    # STEP 4: Fine-Tuned Merged 8-bit Adapter Evaluation
+    merged_adapter_8bit_outputs = None
+    step4_elapsed = None
     if MERGED_MODEL_PATH.exists():
-        # Release base engine GPU memory before loading merged model
-        engine.shutdown()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             gc.collect()
 
         print(
-            "\n[INFO] Initializing SGLang engine with Fine-Tuned Merged Model"
-            f" from: {MERGED_MODEL_PATH}"
+            "\n[INFO] Initializing SGLang engine with Fine-Tuned Merged 8-bit"
+            f" Model from: {MERGED_MODEL_PATH}"
         )
         merged_engine = sgl.Engine(
             model_path=str(MERGED_MODEL_PATH),
@@ -484,17 +515,17 @@ def main() -> None:
             context_length=MAX_SEQUENCE_LENGTH,
         )
 
-        # STEP 4: Merged Model WITHOUT thinking
         print("=" * 60)
         print(
-            "[STEP 4/5] Running Fine-Tuned Merged Model WITHOUT thinking for"
+            "[STEP 4/4] Running Fine-Tuned Merged 8-bit Model WITH thinking"
+            " (enable_thinking=True, T=1.0, top_p=0.95) for"
             f" {len(records)} samples..."
         )
         print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         step4_start = time.time()
 
-        merged_outputs = merged_engine.generate(
-            prompts_no_thinking, sampling_params_no_thinking
+        merged_adapter_8bit_outputs = merged_engine.generate(
+            prompts_thinking, sampling_params_thinking
         )
 
         step4_elapsed = time.time() - step4_start
@@ -503,39 +534,17 @@ def main() -> None:
             f" ({step4_elapsed/len(records):.2f}s/sample)\n"
         )
 
-        # STEP 5: Merged Model WITH thinking
-        print("=" * 60)
-        print(
-            "[STEP 5/5] Running Fine-Tuned Merged Model WITH thinking"
-            " (enable_thinking=True, T=1.0, top_p=0.95) for"
-            f" {len(records)} samples..."
-        )
-        print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        step5_start = time.time()
-
-        merged_thinking_outputs = merged_engine.generate(
-            prompts_thinking, sampling_params_thinking
-        )
-
-        step5_elapsed = time.time() - step5_start
-        print(
-            f"[SUCCESS] Step 5 completed in {step5_elapsed:.1f}s"
-            f" ({step5_elapsed/len(records):.2f}s/sample)\n"
-        )
-
         merged_engine.shutdown()
     else:
         print("=" * 60)
         print(
-            "[INFO] [STEP 4/5 & 5/5] Fine-tuned merged dialogs model not found"
-            f" at '{MERGED_MODEL_PATH}'."
+            "[INFO] [STEP 4/4] Fine-tuned merged dialogs model not found at"
+            f" '{MERGED_MODEL_PATH}'."
         )
         print(
-            "[INFO] Skipping Passes 4 & 5 (run"
-            " scripts/run_training_dialogs.sh first to produce merged FP8"
-            " model).\n"
+            "[INFO] Skipping Pass 4 (run scripts/run_training_dialogs.sh first"
+            " to produce merged FP8 model).\n"
         )
-        engine.shutdown()
 
     # 5. Calculate metrics and assemble results
     print("=" * 60)
@@ -549,8 +558,7 @@ def main() -> None:
         "gemma4": [],
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
-        "gemma4_merged": [],
-        "gemma4_merged_thinking": [],
+        "gemma4_merged_adapter_8bit": [],
     }
     wstf_scores = {
         "input": [],
@@ -558,8 +566,7 @@ def main() -> None:
         "gemma4": [],
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
-        "gemma4_merged": [],
-        "gemma4_merged_thinking": [],
+        "gemma4_merged_adapter_8bit": [],
     }
 
     for idx, rec in enumerate(records):
@@ -590,28 +597,20 @@ def main() -> None:
         gemma4_thinking_metrics = get_raw_metrics(out_thinking)
         gemma4_few_shots_metrics = get_raw_metrics(out_few_shots)
 
-        out_merged = None
-        merged_reasoning = None
-        gemma4_merged_metrics = None
+        out_merged_adapter_8bit = None
+        merged_adapter_8bit_reasoning = None
+        gemma4_merged_adapter_8bit_metrics = None
 
-        if merged_outputs is not None:
-            raw_merged = extract_output_text(merged_outputs[idx])
-            merged_reasoning, out_merged = extract_gemma4_reasoning(raw_merged)
-            gemma4_merged_metrics = get_raw_metrics(out_merged)
-
-        out_merged_thinking = None
-        merged_thinking_reasoning = None
-        gemma4_merged_thinking_metrics = None
-
-        if merged_thinking_outputs is not None:
-            raw_merged_thinking = extract_output_text(
-                merged_thinking_outputs[idx]
+        if merged_adapter_8bit_outputs is not None:
+            raw_merged_8bit = extract_output_text(
+                merged_adapter_8bit_outputs[idx]
             )
-            merged_thinking_reasoning, out_merged_thinking = (
-                extract_gemma4_reasoning(raw_merged_thinking)
-            )
-            gemma4_merged_thinking_metrics = get_raw_metrics(
-                out_merged_thinking
+            (
+                merged_adapter_8bit_reasoning,
+                out_merged_adapter_8bit,
+            ) = extract_gemma4_reasoning(raw_merged_8bit)
+            gemma4_merged_adapter_8bit_metrics = get_raw_metrics(
+                out_merged_adapter_8bit
             )
 
         if assistant_metrics is not None:
@@ -622,11 +621,9 @@ def main() -> None:
             fre_scores["gemma4_dynamic_few_shots"].append(
                 gemma4_few_shots_metrics["fre"]
             )
-            if gemma4_merged_metrics is not None:
-                fre_scores["gemma4_merged"].append(gemma4_merged_metrics["fre"])
-            if gemma4_merged_thinking_metrics is not None:
-                fre_scores["gemma4_merged_thinking"].append(
-                    gemma4_merged_thinking_metrics["fre"]
+            if gemma4_merged_adapter_8bit_metrics is not None:
+                fre_scores["gemma4_merged_adapter_8bit"].append(
+                    gemma4_merged_adapter_8bit_metrics["fre"]
                 )
 
             wstf_scores["input"].append(user_metrics["wstf"])
@@ -638,14 +635,24 @@ def main() -> None:
             wstf_scores["gemma4_dynamic_few_shots"].append(
                 gemma4_few_shots_metrics["wstf"]
             )
-            if gemma4_merged_metrics is not None:
-                wstf_scores["gemma4_merged"].append(
-                    gemma4_merged_metrics["wstf"]
+            if gemma4_merged_adapter_8bit_metrics is not None:
+                wstf_scores["gemma4_merged_adapter_8bit"].append(
+                    gemma4_merged_adapter_8bit_metrics["wstf"]
                 )
-            if gemma4_merged_thinking_metrics is not None:
-                wstf_scores["gemma4_merged_thinking"].append(
-                    gemma4_merged_thinking_metrics["wstf"]
-                )
+
+        examples = few_shot_examples_per_sample[idx]
+        fewshot1_original = (
+            examples[0]["user_input"] if len(examples) > 0 else None
+        )
+        fewshot1_assistant = (
+            examples[0]["assistant"] if len(examples) > 0 else None
+        )
+        fewshot2_original = (
+            examples[1]["user_input"] if len(examples) > 1 else None
+        )
+        fewshot2_assistant = (
+            examples[1]["assistant"] if len(examples) > 1 else None
+        )
 
         result_entry = {
             "id": rec["id"],
@@ -655,6 +662,10 @@ def main() -> None:
             "user_input_metrics": user_metrics,
             "user": rec["user"],
             "user_dynamic_few_shots": few_shot_conversations[idx][1]["content"],
+            "fewshot1_original": fewshot1_original,
+            "fewshot1_assistant": fewshot1_assistant,
+            "fewshot2_original": fewshot2_original,
+            "fewshot2_assistant": fewshot2_assistant,
             "assistant": rec["assistant"],
             "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,
@@ -667,15 +678,12 @@ def main() -> None:
             "assistant_gemma4_dynamic_few_shots_metrics": (
                 gemma4_few_shots_metrics
             ),
-            "assistant_gemma4_merged_reasoning": merged_reasoning,
-            "assistant_gemma4_merged": out_merged,
-            "assistant_gemma4_merged_metrics": gemma4_merged_metrics,
-            "assistant_gemma4_merged_thinking_reasoning": (
-                merged_thinking_reasoning
+            "assistant_gemma4_merged_adapter_8bit_reasoning": (
+                merged_adapter_8bit_reasoning
             ),
-            "assistant_gemma4_merged_thinking": out_merged_thinking,
-            "assistant_gemma4_merged_thinking_metrics": (
-                gemma4_merged_thinking_metrics
+            "assistant_gemma4_merged_adapter_8bit": out_merged_adapter_8bit,
+            "assistant_gemma4_merged_adapter_8bit_metrics": (
+                gemma4_merged_adapter_8bit_metrics
             ),
         }
         results.append(result_entry)
@@ -697,19 +705,8 @@ def main() -> None:
     if num_eval_ds > 0:
         avg_in_fre = sum(fre_scores["input"]) / num_eval_ds
         avg_gt_fre = sum(fre_scores["ground_truth"]) / num_eval_ds
-        avg_g4_fre = sum(fre_scores["gemma4"]) / num_eval_ds
-        avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / num_eval_ds
-        avg_g4_few_fre = (
-            sum(fre_scores["gemma4_dynamic_few_shots"]) / num_eval_ds
-        )
-
         avg_in_wstf = sum(wstf_scores["input"]) / num_eval_ds
         avg_gt_wstf = sum(wstf_scores["ground_truth"]) / num_eval_ds
-        avg_g4_wstf = sum(wstf_scores["gemma4"]) / num_eval_ds
-        avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / num_eval_ds
-        avg_g4_few_wstf = (
-            sum(wstf_scores["gemma4_dynamic_few_shots"]) / num_eval_ds
-        )
 
         print(
             f"  * Input Standardsprache         : FRE = {avg_in_fre:.1f}  |"
@@ -719,46 +716,171 @@ def main() -> None:
             f"  * Ground Truth (Target)         : FRE = {avg_gt_fre:.1f}  |"
             f"  WSTF = {avg_gt_wstf:.1f}"
         )
-        print(
-            f"  * Gemma 4 (Zero-Shot)           : FRE = {avg_g4_fre:.1f}  |"
-            f"  WSTF = {avg_g4_wstf:.1f}"
-        )
-        print(
-            "  * Gemma 4 (With Thinking)       : FRE ="
-            f" {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}"
-        )
-        print(
-            "  * Gemma 4 (Few-Shots + Thinking): FRE ="
-            f" {avg_g4_few_fre:.1f}  |  WSTF = {avg_g4_few_wstf:.1f}"
-        )
 
-        if fre_scores["gemma4_merged"]:
-            avg_g4_merged_fre = sum(fre_scores["gemma4_merged"]) / len(
-                fre_scores["gemma4_merged"]
-            )
-            avg_g4_merged_wstf = sum(wstf_scores["gemma4_merged"]) / len(
-                wstf_scores["gemma4_merged"]
+        if fre_scores["gemma4"]:
+            avg_g4_fre = sum(fre_scores["gemma4"]) / len(fre_scores["gemma4"])
+            avg_g4_wstf = sum(wstf_scores["gemma4"]) / len(
+                wstf_scores["gemma4"]
             )
             print(
-                "  * Gemma 4 (Fine-Tuned Merged)   : FRE ="
-                f" {avg_g4_merged_fre:.1f}  |  WSTF = {avg_g4_merged_wstf:.1f}"
+                f"  * Gemma 4 (Zero-Shot)           : FRE = {avg_g4_fre:.1f}  |"
+                f"  WSTF = {avg_g4_wstf:.1f}"
             )
 
-        if fre_scores["gemma4_merged_thinking"]:
-            avg_g4_merged_think_fre = sum(
-                fre_scores["gemma4_merged_thinking"]
-            ) / len(fre_scores["gemma4_merged_thinking"])
-            avg_g4_merged_think_wstf = sum(
-                wstf_scores["gemma4_merged_thinking"]
-            ) / len(wstf_scores["gemma4_merged_thinking"])
+        if fre_scores["gemma4_thinking"]:
+            avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / len(
+                fre_scores["gemma4_thinking"]
+            )
+            avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / len(
+                wstf_scores["gemma4_thinking"]
+            )
             print(
-                "  * Gemma 4 (Merged + Thinking)   : FRE ="
-                f" {avg_g4_merged_think_fre:.1f}  |  WSTF ="
-                f" {avg_g4_merged_think_wstf:.1f}"
+                "  * Gemma 4 (With Thinking)       : FRE ="
+                f" {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}"
+            )
+
+        if fre_scores["gemma4_dynamic_few_shots"]:
+            avg_g4_few_fre = sum(fre_scores["gemma4_dynamic_few_shots"]) / len(
+                fre_scores["gemma4_dynamic_few_shots"]
+            )
+            avg_g4_few_wstf = sum(
+                wstf_scores["gemma4_dynamic_few_shots"]
+            ) / len(wstf_scores["gemma4_dynamic_few_shots"])
+            print(
+                "  * Gemma 4 (Few-Shots + Thinking): FRE ="
+                f" {avg_g4_few_fre:.1f}  |  WSTF = {avg_g4_few_wstf:.1f}"
+            )
+
+        if fre_scores["gemma4_merged_adapter_8bit"]:
+            avg_g4_merged_8bit_fre = sum(
+                fre_scores["gemma4_merged_adapter_8bit"]
+            ) / len(fre_scores["gemma4_merged_adapter_8bit"])
+            avg_g4_merged_8bit_wstf = sum(
+                wstf_scores["gemma4_merged_adapter_8bit"]
+            ) / len(wstf_scores["gemma4_merged_adapter_8bit"])
+            print(
+                "  * Gemma 4 (Merged 8-bit + Think): FRE ="
+                f" {avg_g4_merged_8bit_fre:.1f}  |  WSTF ="
+                f" {avg_g4_merged_8bit_wstf:.1f}"
             )
 
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
+
+    # Calculate throughput speeds and write results_dialogs-metadata.json
+    assistant_gemma4_speed = calculate_speed(
+        no_thinking_outputs, step1_elapsed or 0, tokenizer
+    )
+    assistant_gemma4_thinking_speed = calculate_speed(
+        thinking_outputs, step2_elapsed or 0, tokenizer
+    )
+    assistant_gemma4_dynamic_few_shots_speed = calculate_speed(
+        few_shot_outputs, step3_elapsed or 0, tokenizer
+    )
+    assistant_gemma4_merged_adapter_8bit_speed = (
+        calculate_speed(
+            merged_adapter_8bit_outputs, step4_elapsed or 0, tokenizer
+        )
+        if merged_adapter_8bit_outputs
+        else None
+    )
+
+    metadata = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "total_samples": len(results),
+        "total_evaluation_time_seconds": round(overall_elapsed, 2),
+        "phase_elapsed_seconds": {
+            "step1_base_zero_shot": (
+                round(step1_elapsed, 2) if step1_elapsed is not None else None
+            ),
+            "step2_base_thinking": (
+                round(step2_elapsed, 2) if step2_elapsed is not None else None
+            ),
+            "step3_base_few_shots": (
+                round(step3_elapsed, 2) if step3_elapsed is not None else None
+            ),
+            "step4_merged_adapter_8bit": (
+                round(step4_elapsed, 2) if step4_elapsed is not None else None
+            ),
+        },
+        "model_speeds_tokens_per_second": {
+            "assistant_gemma4_speed": assistant_gemma4_speed,
+            "assistant_gemma4_thinking_speed": assistant_gemma4_thinking_speed,
+            "assistant_gemma4_dynamic_few_shots_speed": (
+                assistant_gemma4_dynamic_few_shots_speed
+            ),
+            "assistant_gemma4_merged_adapter_8bit_speed": (
+                assistant_gemma4_merged_adapter_8bit_speed
+            ),
+        },
+        "average_metrics": {
+            "input_standardsprache": {
+                "fre": round(avg_in_fre, 1) if num_eval_ds > 0 else None,
+                "wstf": round(avg_in_wstf, 1) if num_eval_ds > 0 else None,
+            },
+            "ground_truth": {
+                "fre": round(avg_gt_fre, 1) if num_eval_ds > 0 else None,
+                "wstf": round(avg_gt_wstf, 1) if num_eval_ds > 0 else None,
+            },
+            "assistant_gemma4": {
+                "fre": round(avg_g4_fre, 1) if fre_scores["gemma4"] else None,
+                "wstf": (
+                    round(avg_g4_wstf, 1) if wstf_scores["gemma4"] else None
+                ),
+                "speed_tokens_per_sec": assistant_gemma4_speed,
+            },
+            "assistant_gemma4_thinking": {
+                "fre": (
+                    round(avg_g4_think_fre, 1)
+                    if fre_scores["gemma4_thinking"]
+                    else None
+                ),
+                "wstf": (
+                    round(avg_g4_think_wstf, 1)
+                    if wstf_scores["gemma4_thinking"]
+                    else None
+                ),
+                "speed_tokens_per_sec": assistant_gemma4_thinking_speed,
+            },
+            "assistant_gemma4_dynamic_few_shots": {
+                "fre": (
+                    round(avg_g4_few_fre, 1)
+                    if fre_scores["gemma4_dynamic_few_shots"]
+                    else None
+                ),
+                "wstf": (
+                    round(avg_g4_few_wstf, 1)
+                    if wstf_scores["gemma4_dynamic_few_shots"]
+                    else None
+                ),
+                "speed_tokens_per_sec": (
+                    assistant_gemma4_dynamic_few_shots_speed
+                ),
+            },
+            "assistant_gemma4_merged_adapter_8bit": {
+                "fre": (
+                    round(avg_g4_merged_8bit_fre, 1)
+                    if fre_scores["gemma4_merged_adapter_8bit"]
+                    else None
+                ),
+                "wstf": (
+                    round(avg_g4_merged_8bit_wstf, 1)
+                    if wstf_scores["gemma4_merged_adapter_8bit"]
+                    else None
+                ),
+                "speed_tokens_per_sec": (
+                    assistant_gemma4_merged_adapter_8bit_speed
+                ),
+            },
+        },
+    }
+
+    with RESULTS_METADATA_PATH.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+    print(
+        "[SUCCESS] Wrote evaluation metadata and throughput speeds to:"
+        f" {RESULTS_METADATA_PATH}\n"
+    )
 
 
 if __name__ == "__main__":
