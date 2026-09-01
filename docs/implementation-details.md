@@ -291,12 +291,11 @@ dvc repro
 
 ## 3. Gemma 4 Evaluation (`src-eval/evaluation.py`)
 
-Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **SGLang** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across two modes via native chat template thinking control:
+Runs inference on the 10% evaluation dataset (`data/dataset_eval.jsonl`) using **SGLang** with the base model `RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic` across four techniques via native chat template thinking control:
 1. **Standard Zero-Shot Translation** (`enable_thinking=False`, $T=0.0$)
 2. **Thinking-Enabled Zero-Shot Translation** (`enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
 3. **Dynamic Few-Shot Translation with Thinking** ($k=2$ retrieved examples from training set via `multilingual-e5-base`, `enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
 4. **Fine-Tuned Merged FP8 Model with Thinking** (`enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$)
-5. **Fine-Tuned 16-bit Base Model with Unmerged LoRA Adapter** (`enable_thinking=True`, $T=1.0, top\_p=0.95, top\_k=64$, requires $\ge 2$ GPUs)
 
 Produces `data/results.jsonl` with German textstat readability metrics (`fre` = Flesch Reading Ease, `wstf` = Wiener Sachtextformel):
 ```json
@@ -307,6 +306,10 @@ Produces `data/results.jsonl` with German textstat readability metrics (`fre` = 
   "user_input_metrics": { "fre": 45.2, "wstf": 11.4 },
   "user": "<zero-shot prompt template wrapped text>",
   "user_dynamic_few_shots": "<prompt template with 2 few-shot demonstrations>",
+  "fewshot1_original": "<demonstration 1 original Standardsprache input>",
+  "fewshot1_assistant": "<demonstration 1 ground truth Leichte Sprache translation>",
+  "fewshot2_original": "<demonstration 2 original Standardsprache input>",
+  "fewshot2_assistant": "<demonstration 2 ground truth Leichte Sprache translation>",
   "assistant": "<ground-truth Leichte_Sprache>",
   "assistant_metrics": { "fre": 88.5, "wstf": 4.1 },
   "assistant_gemma4": "<gemma4 output without thinking>",
@@ -319,10 +322,7 @@ Produces `data/results.jsonl` with German textstat readability metrics (`fre` = 
   "assistant_gemma4_dynamic_few_shots_metrics": { "fre": 87.1, "wstf": 4.2 },
   "assistant_gemma4_merged_adapter_8bit_reasoning": "<merged 8-bit adapter reasoning trace>",
   "assistant_gemma4_merged_adapter_8bit": "<merged 8-bit adapter output with thinking>",
-  "assistant_gemma4_merged_adapter_8bit_metrics": { "fre": 89.2, "wstf": 3.9 },
-  "assistant_gemma4_adapter_16bit_reasoning": "<16-bit unmerged adapter reasoning trace>",
-  "assistant_gemma4_adapter_16bit": "<16-bit unmerged adapter output with thinking>",
-  "assistant_gemma4_adapter_16bit_metrics": { "fre": 89.8, "wstf": 3.8 }
+  "assistant_gemma4_merged_adapter_8bit_metrics": { "fre": 89.2, "wstf": 3.9 }
 }
 ```
 
