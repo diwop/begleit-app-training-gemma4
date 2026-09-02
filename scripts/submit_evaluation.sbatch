@@ -5,7 +5,7 @@
 #SBATCH --gpus=2
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
-#SBATCH --time=01:00:00
+#SBATCH --time=00:40:00
 #SBATCH --output=logs/eval_%j.log
 #SBATCH --error=logs/eval_%j-err.log
 
