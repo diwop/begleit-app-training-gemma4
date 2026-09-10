@@ -1,0 +1,69 @@
+{
+  "timestamp": "2026-09-10T16:00:00Z",
+  "judge_model": "nvidia/Llama-4-Scout-17B-16E-Instruct-FP8",
+  "tensor_parallel_size": 4,
+  "total_samples": 77,
+  "total_evaluations": 308,
+  "evaluation_time_seconds": 742.8,
+  "models": {
+    "assistant_gemma4": {
+      "label": "Zero-Shot (Base Gemma 4)",
+      "evaluated_samples": 77,
+      "average_scores": {
+        "rule_adherence": 3.6,
+        "factual_completeness": 4.38,
+        "readability": 3.89
+      },
+      "vs_ground_truth_percent": {
+        "better": 0.0,
+        "comparable": 31.2,
+        "worse": 68.8
+      }
+    },
+    "assistant_gemma4_thinking": {
+      "label": "Zero-Shot + Thinking (Base Gemma 4)",
+      "evaluated_samples": 77,
+      "average_scores": {
+        "rule_adherence": 4.11,
+        "factual_completeness": 4.69,
+        "readability": 4.39
+      },
+      "vs_ground_truth_percent": {
+        "better": 35.1,
+        "comparable": 64.9,
+        "worse": 0.0
+      }
+    },
+    "assistant_gemma4_dynamic_few_shots": {
+      "label": "Dynamic Few-Shot (Base Gemma 4)",
+      "evaluated_samples": 77,
+      "average_scores": {
+        "rule_adherence": 4.26,
+        "factual_completeness": 4.72,
+        "readability": 4.5
+      },
+      "vs_ground_truth_percent": {
+        "better": 35.1,
+        "comparable": 64.9,
+        "worse": 0.0
+      }
+    },
+    "assistant_gemma4_merged_adapter_8bit": {
+      "label": "Fine-Tuned Merged 8-bit Adapter",
+      "evaluated_samples": 77,
+      "average_scores": {
+        "rule_adherence": 4.7,
+        "factual_completeness": 4.86,
+        "readability": 4.81
+      },
+      "vs_ground_truth_percent": {
+        "better": 74.0,
+        "comparable": 26.0,
+        "worse": 0.0
+      }
+    }
+  },
+  "pareto_frontier": [
+    "assistant_gemma4_merged_adapter_8bit"
+  ]
+}
