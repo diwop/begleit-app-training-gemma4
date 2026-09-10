@@ -81,7 +81,6 @@ Gib als Antwort **ausschließlich** ein valides JSON-Objekt ohne umschließenden
     "relative_to_ground_truth": "comparable",
     "critique": "Vergleich mit der menschlichen Referenz."
   },
-  "overall_score": 4.7,
   "summary": "Gesamtfazit zur Übersetzungsqualität in 1-2 Sätzen."
 }
 ```

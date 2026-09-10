@@ -93,7 +93,7 @@ def parse_judge_json(raw_text: str) -> dict[str, Any] | None:
 
     try:
         data = json.loads(text)
-        if isinstance(data, dict) and "overall_score" in data:
+        if isinstance(data, dict) and "rule_adherence" in data:
             return data
     except Exception:
         pass
@@ -237,7 +237,6 @@ def main() -> None:
         "rule_adherence": [],
         "factual_completeness": [],
         "readability": [],
-        "overall_score": [],
         "comparisons": {"better": 0, "comparable": 0, "worse": 0},
         "count": 0,
     })
@@ -265,8 +264,6 @@ def main() -> None:
                 m["factual_completeness"].append(float(parsed["factual_completeness"]["score"]))
             if "readability" in parsed and isinstance(parsed["readability"], dict) and "score" in parsed["readability"]:
                 m["readability"].append(float(parsed["readability"]["score"]))
-            if "overall_score" in parsed and parsed["overall_score"] is not None:
-                m["overall_score"].append(float(parsed["overall_score"]))
 
             cmp_cat = parsed.get("ground_truth_comparison", {}).get("relative_to_ground_truth", "").lower()
             if cmp_cat in m["comparisons"]:
@@ -293,7 +290,7 @@ def main() -> None:
     print("        LLM-as-a-Judge: Aggregated Evaluation Summary")
     print("=" * 65)
 
-    ranking_list = []
+    model_score_averages = {}
     for cand_key, cand_label in CANDIDATE_MODELS:
         data = model_metrics[cand_key]
         n = data["count"]
@@ -303,7 +300,12 @@ def main() -> None:
         avg_rule = round(sum(data["rule_adherence"]) / len(data["rule_adherence"]), 2) if data["rule_adherence"] else None
         avg_fact = round(sum(data["factual_completeness"]) / len(data["factual_completeness"]), 2) if data["factual_completeness"] else None
         avg_read = round(sum(data["readability"]) / len(data["readability"]), 2) if data["readability"] else None
-        avg_overall = round(sum(data["overall_score"]) / len(data["overall_score"]), 2) if data["overall_score"] else None
+
+        model_score_averages[cand_key] = {
+            "rule_adherence": avg_rule or 0.0,
+            "factual_completeness": avg_fact or 0.0,
+            "readability": avg_read or 0.0,
+        }
 
         total_cmp = sum(data["comparisons"].values()) or 1
         pct_better = round((data["comparisons"]["better"] / total_cmp) * 100, 1)
@@ -317,7 +319,6 @@ def main() -> None:
                 "rule_adherence": avg_rule,
                 "factual_completeness": avg_fact,
                 "readability": avg_read,
-                "overall": avg_overall,
             },
             "vs_ground_truth_percent": {
                 "better": pct_better,
@@ -326,25 +327,35 @@ def main() -> None:
             },
         }
 
-        ranking_list.append({
-            "key": cand_key,
-            "label": cand_label,
-            "overall": avg_overall or 0.0,
-            "rule": avg_rule or 0.0,
-            "fact": avg_fact or 0.0,
-            "read": avg_read or 0.0,
-            "pct_ge_gt": round(pct_better + pct_comparable, 1),
-        })
-
         print(f"\n* Model: {cand_label}")
-        print(f"  - Overall Score       : {avg_overall} / 5.0")
         print(f"  - Rule Adherence      : {avg_rule} / 5.0")
         print(f"  - Factual Completeness: {avg_fact} / 5.0")
         print(f"  - Readability & Tone  : {avg_read} / 5.0")
         print(f"  - vs. Ground Truth    : {pct_better}% Better | {pct_comparable}% Comparable | {pct_worse}% Worse")
 
-    ranking_list.sort(key=lambda x: x["overall"], reverse=True)
-    summary_data["ranking"] = [item["key"] for item in ranking_list]
+    # Dynamic Pareto Frontier computation across the 3 independent axes
+    pareto_frontier = []
+    for m1, s1 in model_score_averages.items():
+        dominated = False
+        for m2, s2 in model_score_averages.items():
+            if m1 == m2:
+                continue
+            r_ge = s2["rule_adherence"] >= s1["rule_adherence"]
+            f_ge = s2["factual_completeness"] >= s1["factual_completeness"]
+            e_ge = s2["readability"] >= s1["readability"]
+            strictly_better = (
+                s2["rule_adherence"] > s1["rule_adherence"]
+                or s2["factual_completeness"] > s1["factual_completeness"]
+                or s2["readability"] > s1["readability"]
+            )
+            if r_ge and f_ge and e_ge and strictly_better:
+                dominated = True
+                break
+        if not dominated:
+            pareto_frontier.append(m1)
+
+    summary_data["pareto_frontier"] = pareto_frontier
+    print(f"\n[INFO] Pareto Frontier Models (Non-dominated): {pareto_frontier}")
 
     with JUDGE_SUMMARY_PATH.open("w", encoding="utf-8") as f:
         json.dump(summary_data, f, indent=2, ensure_ascii=False)

@@ -57,7 +57,6 @@ Rather than presenting all 4 candidate translations in a single prompt (which tr
 | **`rule_adherence`** | 1.0 – 5.0 | Sentence length ($\le 10$ words), hyphenation of compound nouns (`Bundes-Tag`), active voice only, no subjunctive/passive, simple vocabulary. |
 | **`factual_completeness`** | 1.0 – 5.0 | Preservation of core legal/practical facts, zero hallucinations, no distortive framing. |
 | **`readability`** | 1.0 – 5.0 | Natural flow, logical structure with headings/paragraphs, respectful and adult tone. |
-| **`overall_score`** | 1.0 – 5.0 | Comprehensive evaluation of the translation quality. |
 | **`ground_truth_comparison`** | Categorical | `"better"`, `"comparable"`, or `"worse"` relative to the human reference. |
 
 ### Structured Output Schema
@@ -80,7 +79,6 @@ The judge outputs valid, parseable JSON:
     "relative_to_ground_truth": "comparable",
     "critique": "Struktur und Vereinfachung sind auf Augenhöhe mit der menschlichen Übersetzung."
   },
-  "overall_score": 4.8,
   "summary": "Sehr gelungene Übersetzung mit minimalem Optimierungspotenzial beim Passiv."
 }
 ```
