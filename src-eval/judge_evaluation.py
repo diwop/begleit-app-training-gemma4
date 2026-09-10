@@ -47,7 +47,6 @@ CANDIDATE_MODELS = [
     ("assistant_gemma4_thinking", "Zero-Shot + Thinking (Base Gemma 4)"),
     ("assistant_gemma4_dynamic_few_shots", "Dynamic Few-Shot (Base Gemma 4)"),
     ("assistant_gemma4_merged_adapter_8bit", "Fine-Tuned Merged 8-bit Adapter"),
-    ("assistant", "Human Reference (Ground Truth Control)"),
 ]
 
 

@@ -46,7 +46,6 @@ Rather than presenting all 4 candidate translations in a single prompt (which tr
 2. `assistant_gemma4_thinking`: Zero-Shot + Thinking (Base Gemma 4)
 3. `assistant_gemma4_dynamic_few_shots`: Dynamic Few-Shot ($k=2$)
 4. `assistant_gemma4_merged_adapter_8bit`: Fine-Tuned Merged 8-bit Adapter
-5. `assistant`: Human Reference (Ground Truth Control)
 
 ---
 
