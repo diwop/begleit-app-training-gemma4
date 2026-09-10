@@ -35,7 +35,9 @@ MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
 MAX_SEQUENCE_LENGTH = int(os.environ.get("MAX_SEQUENCE_LENGTH", "16384"))
 
 EVAL_RESULTS_PATH = Path("data/results.jsonl")
-JUDGE_RUBRIC_PATH = Path("prompts/judge-rubric.md")
+JUDGE_SYSTEM_PROMPT_PATH = Path("prompts/judge-system-prompt.md")
+JUDGE_PROMPT_TEMPLATE_PATH = Path("prompts/judge-prompt-template.md")
+TRANSLATOR_SYSTEM_PROMPT_PATH = Path("prompts/system-prompt.md")
 JUDGE_RESULTS_PATH = Path("data/judge_results.jsonl")
 JUDGE_SUMMARY_PATH = Path("data/judge_summary.json")
 
@@ -49,15 +51,11 @@ CANDIDATE_MODELS = [
 ]
 
 
-def load_judge_system_prompt() -> str:
-    """Load the Leichte Sprache evaluation rubric and system prompt."""
-    if JUDGE_RUBRIC_PATH.exists():
-        return JUDGE_RUBRIC_PATH.read_text(encoding="utf-8").strip()
-    return (
-        "Du bist ein unabhängiger Sprachexperte und Evaluator für Leichte Sprache. "
-        "Bewerte die vorgelegte Übersetzung nach Regeltreue, Faktentreue und Verständlichkeit. "
-        "Antworte ausschließlich im geforderten JSON-Format."
-    )
+def load_file_content(path: Path, default: str = "") -> str:
+    """Load text file content with fallback."""
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    return default
 
 
 def get_model_snapshot_path(model_name: str) -> str:
@@ -142,7 +140,24 @@ def main() -> None:
         eval_records = eval_records[:MAX_EVAL_SAMPLES]
         print(f"[INFO] Subsetting to first {len(eval_records)} samples for evaluation (MAX_EVAL_SAMPLES={MAX_EVAL_SAMPLES}).")
 
-    system_prompt = load_judge_system_prompt()
+    judge_system_prompt = load_file_content(
+        JUDGE_SYSTEM_PROMPT_PATH,
+        default="Du bist ein unabhängiger Sprachexperte und Evaluator für Leichte Sprache. Antworte ausschließlich in JSON.",
+    )
+    judge_prompt_template = load_file_content(
+        JUDGE_PROMPT_TEMPLATE_PATH,
+        default=(
+            "### 1. Vorgaben und Regeln für die Übersetzung\n```markdown\n%SYSTEM_PROMPT%\n```\n\n"
+            "### 2. Ausgangstext (Standardsprache)\n```text\n%ORIGINAL_TEXT%\n```\n\n"
+            "### 3. Menschliche Referenzübersetzung (Ground Truth)\n```text\n%GROUND_TRUTH%\n```\n\n"
+            "### 4. Zu bewertende Modellübersetzung (%MODEL_LABEL%)\n```text\n%TRANSLATION%\n```\n\n"
+            "### Aufgabe für den Evaluator\nBewerte die Modellübersetzung und antworte ausschließlich im geforderten JSON-Format."
+        ),
+    )
+    translator_system_prompt = load_file_content(
+        TRANSLATOR_SYSTEM_PROMPT_PATH,
+        default="Du bist ein spezialisierter Übersetzer, der deutsche Sprache in Leichte Sprache übersetzt.",
+    )
 
     # Build pointwise evaluation requests: (sample, candidate_key, candidate_label)
     evaluation_requests = []
@@ -156,15 +171,12 @@ def main() -> None:
                 continue
 
             user_prompt = (
-                f"### Ausgangstext (Standardsprache):\n"
-                f"```text\n{user_input}\n```\n\n"
-                f"### Menschliche Referenzübersetzung (Ground Truth):\n"
-                f"```text\n{ground_truth}\n```\n\n"
-                f"### Zu bewertende Übersetzung ({cand_label}):\n"
-                f"```text\n{cand_text}\n```\n\n"
-                f"### Aufgabe:\n"
-                f"Bewerte die obige Übersetzung gemäß den Kriterien im System-Prompt.\n"
-                f"Gib deine Bewertung ausschließlich als valides JSON-Objekt aus."
+                judge_prompt_template
+                .replace("%SYSTEM_PROMPT%", translator_system_prompt)
+                .replace("%ORIGINAL_TEXT%", user_input)
+                .replace("%GROUND_TRUTH%", ground_truth)
+                .replace("%TRANSLATION%", cand_text)
+                .replace("%MODEL_LABEL%", cand_label)
             )
 
             evaluation_requests.append({
@@ -172,7 +184,7 @@ def main() -> None:
                 "candidate_key": cand_key,
                 "candidate_label": cand_label,
                 "conversation": [
-                    {"role": "system", "content": system_prompt},
+                    {"role": "system", "content": judge_system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
             })

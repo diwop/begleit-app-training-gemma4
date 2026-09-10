@@ -39,7 +39,7 @@ Total Allocation               : ~170–180 GB (TP=4)
 Rather than presenting all 4 candidate translations in a single prompt (which triggers position bias, attention dilution, and verbosity bias), each candidate translation is judged **pointwise** in isolation against:
 1. The original Standardsprache source text.
 2. The Human Ground Truth reference.
-3. The official Leichte Sprache guidelines (from `prompts/judge-rubric.md`).
+3. The official Leichte Sprache guidelines dynamically embedded from [`prompts/system-prompt.md`](file:///Users/christophwulf/github/diwop/begleit-app-training-gemma4/prompts/system-prompt.md) via [`prompts/judge-prompt-template.md`](file:///Users/christophwulf/github/diwop/begleit-app-training-gemma4/.worktrees/judge-llama4-scout/prompts/judge-prompt-template.md).
 
 ### Models Evaluated
 1. `assistant_gemma4`: Zero-Shot (Base Gemma 4)
