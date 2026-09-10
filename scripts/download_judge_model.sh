@@ -40,8 +40,18 @@ from huggingface_hub import snapshot_download
 
 target_model = '${JUDGE_MODEL}'
 token = os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN')
+if not token:
+    token_file = os.path.expanduser('~/.cache/huggingface/token')
+    if os.path.exists(token_file):
+        with open(token_file, 'r') as f:
+            token = f.read().strip()
+if not token:
+    token_file_alt = '${HF_CACHE_DIR}/token'
+    if os.path.exists(token_file_alt):
+        with open(token_file_alt, 'r') as f:
+            token = f.read().strip()
 
-print(f'[INFO] Downloading snapshot for {target_model}...')
+print(f'[INFO] Downloading snapshot for {target_model} (token present: {bool(token)})...')
 try:
     path = snapshot_download(
         repo_id=target_model,
