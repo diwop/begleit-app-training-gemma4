@@ -4,6 +4,7 @@ local/
 images/
 *.sif
 logs/
+.worktrees/
 .dvc/config.local
 .dvc/tmp
 

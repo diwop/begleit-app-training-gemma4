@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=gemma4-train-dialogs-fp8
 #SBATCH --partition=small_gpu8
-#SBATCH --nodes=1
-#SBATCH --gpus=2
+#SBATCH --nodes=1-1
+#SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
 #SBATCH --time=00:30:00
