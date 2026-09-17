@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=judge-llama4
 #SBATCH --partition=small_gpu8
-#SBATCH --nodes=1
-#SBATCH --gpus=4
+#SBATCH --nodes=1-1
+#SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=240G
 #SBATCH --time=01:00:00
