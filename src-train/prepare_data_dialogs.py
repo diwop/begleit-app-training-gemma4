@@ -29,6 +29,9 @@ MAX_SEQUENCE_LENGTH = 8192
 RAW_DIR = Path("data/raw_dialogs")
 SYSTEM_PROMPT_PATH = Path("prompts/system-prompt_dialogs.md")
 PROMPT_TEMPLATE_PATH = Path("prompts/prompt-template_dialogs.md")
+FEW_SHOTS_SAMPLE_TEMPLATE_PATH = Path(
+    "prompts/prompt-template-dynamic-few-shots_dialogs_sample.md"
+)
 TRAIN_OUTPUT = Path("data/dataset_train_dialogs.jsonl")
 EVAL_OUTPUT = Path("data/dataset_eval_dialogs.jsonl")
 FULL_OUTPUT = Path("data/dataset_full_dialogs.jsonl")
@@ -219,10 +222,9 @@ def extract_partner_exchanges(
 
 def extract_few_shot_buckets(
     files: list[Path],
-    system_prompt: str,
-    template: str,
-    split_name: str = "train",
-) -> tuple[dict[int, list[dict[str, Any]]], list[dict[str, Any]]]:
+    sample_template: str,
+    tokenizer=None,
+) -> dict[int, list[dict[str, Any]]]:
     """
     Extracts partner turns into 6 history-length buckets:
     - Bucket 0: history_len == 0 (starts of discussion where partner started)
@@ -231,9 +233,19 @@ def extract_few_shot_buckets(
     - Bucket 3: history_len == 3
     - Bucket 4: history_len == 4
     - Bucket 5: history_len >= 5 (history capped to the last 5 turns)
+
+    Format of each record:
+    {
+      "id": ...,
+      "dialog": ...,
+      "exchange_idx": ...,
+      "turn_idx": ...,
+      "input": "...",
+      "sample": "...",
+      "tokens": ...
+    }
     """
     buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(6)}
-    all_records: list[dict[str, Any]] = []
 
     for f in sorted(files, key=lambda x: x.name):
         turns = parse_dialog_file(f)
@@ -251,10 +263,12 @@ def extract_few_shot_buckets(
                     turns_for_history = turns[:idx]
 
                 history_str = format_history(turns_for_history)
-                user_prompt = template.replace("%HISTORY%", history_str).replace(
-                    "%INPUT%", turn["text"]
+                sample_text = (
+                    sample_template.replace("%FEW_SHOT_HISTORY%", history_str)
+                    .replace("%FEW_SHOT_INPUT%", turn["text"])
+                    .replace("%FEW_SHOT_OUTPUT%", turn["translation"])
                 )
-                assistant_text = turn["translation"]
+                tok_count = count_tokens(sample_text, tokenizer)
                 sample_id = f"{doc_stem}_{partner_count:02d}"
 
                 record = {
@@ -262,9 +276,44 @@ def extract_few_shot_buckets(
                     "dialog": f.name,
                     "exchange_idx": partner_count,
                     "turn_idx": idx,
-                    "history_len": history_len,
-                    "bucket": bucket_idx,
-                    "split": split_name,
+                    "input": turn["text"],
+                    "sample": sample_text,
+                    "tokens": tok_count,
+                }
+                buckets[bucket_idx].append(record)
+                partner_count += 1
+
+    return buckets
+
+
+def extract_full_dialog_records(
+    files: list[Path],
+    system_prompt: str,
+    template: str,
+) -> list[dict[str, Any]]:
+    """
+    Extracts all partner exchanges across the given files in full chat format.
+    """
+    records = []
+    for f in sorted(files, key=lambda x: x.name):
+        turns = parse_dialog_file(f)
+        partner_count = 0
+        doc_stem = f.stem
+
+        for idx, turn in enumerate(turns):
+            if turn["speaker"] == "partner":
+                history_str = format_history(turns[:idx])
+                user_prompt = template.replace("%HISTORY%", history_str).replace(
+                    "%INPUT%", turn["text"]
+                )
+                assistant_text = turn["translation"]
+                sample_id = f"{doc_stem}_{partner_count:02d}"
+
+                records.append({
+                    "id": sample_id,
+                    "dialog": f.name,
+                    "exchange_idx": partner_count,
+                    "turn_idx": idx,
                     "system": system_prompt,
                     "history": history_str,
                     "user_input": turn["text"],
@@ -276,12 +325,10 @@ def extract_few_shot_buckets(
                         {"role": "user", "content": user_prompt},
                         {"role": "assistant", "content": assistant_text},
                     ],
-                }
-                buckets[bucket_idx].append(record)
-                all_records.append(record)
+                })
                 partner_count += 1
 
-    return buckets, all_records
+    return records
 
 
 def select_training_exchange_indices(num_exchanges: int) -> list[int]:
@@ -326,8 +373,18 @@ def main() -> None:
         )
         sys.exit(1)
 
+    if not FEW_SHOTS_SAMPLE_TEMPLATE_PATH.exists():
+        print(
+            f"[ERROR] Sample template file not found at: {FEW_SHOTS_SAMPLE_TEMPLATE_PATH}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
     template = PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").strip()
+    sample_template = FEW_SHOTS_SAMPLE_TEMPLATE_PATH.read_text(
+        encoding="utf-8"
+    ).strip()
 
     if not RAW_DIR.exists():
         RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -526,16 +583,19 @@ def main() -> None:
     print(f"[SUCCESS] Wrote {len(eval_records)} eval samples to {EVAL_OUTPUT}")
 
     # Extract few-shot buckets for train, eval, and full splits
-    buckets_train, _ = extract_few_shot_buckets(
-        train_files, system_prompt, template, split_name="train"
+    buckets_train = extract_few_shot_buckets(
+        train_files, sample_template, tokenizer=tokenizer
     )
-    buckets_eval, _ = extract_few_shot_buckets(
-        eval_files, system_prompt, template, split_name="eval"
+    buckets_eval = extract_few_shot_buckets(
+        eval_files, sample_template, tokenizer=tokenizer
     )
-    buckets_full, full_records = extract_few_shot_buckets(
-        raw_files, system_prompt, template, split_name="full"
+    buckets_full = extract_few_shot_buckets(
+        raw_files, sample_template, tokenizer=tokenizer
     )
 
+    full_records = extract_full_dialog_records(
+        raw_files, system_prompt, template
+    )
     full_records_sorted = sorted(full_records, key=lambda r: r["id"])
     write_jsonl(FULL_OUTPUT, full_records_sorted)
     print(f"[SUCCESS] Wrote {len(full_records_sorted)} full dialog samples to {FULL_OUTPUT}")

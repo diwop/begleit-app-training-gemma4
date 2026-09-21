@@ -15,6 +15,7 @@ stages:
     deps:
       - prompts/system-prompt_dialogs.md
       - prompts/prompt-template_dialogs.md
+      - prompts/prompt-template-dynamic-few-shots_dialogs_sample.md
       - data/raw_dialogs
       - src-train/prepare_data_dialogs.py
     outs:
