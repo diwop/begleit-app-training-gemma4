@@ -44,23 +44,23 @@ if [ ! -f "${DVC_VENV}/bin/dvc" ]; then
     uv pip install --python /repo/.dvc-venv "dvc[s3]"
 fi
 
-# 2. Execute dvc pull inside Apptainer (for data/raw_dialogs.dvc or data/raw_dialogs)
+# 2. Execute dvc pull inside Apptainer
 echo "[INFO] Running 'dvc pull' for dialogs..."
-if [ -f "${WORKSPACE_ROOT}/data/raw_dialogs.dvc" ]; then
-  apptainer exec \
-    --bind "${WORKSPACE_ROOT}:/repo" \
-    --bind "${HOME}/.aws:${HOME}/.aws" \
-    --pwd /repo \
-    "${AXOLOTL_SANDBOX}" \
-    /repo/.dvc-venv/bin/dvc pull data/raw_dialogs.dvc
-else
-  apptainer exec \
-    --bind "${WORKSPACE_ROOT}:/repo" \
-    --bind "${HOME}/.aws:${HOME}/.aws" \
-    --pwd /repo \
-    "${AXOLOTL_SANDBOX}" \
-    /repo/.dvc-venv/bin/dvc pull
+TARGETS=("$@")
+if [ ${#TARGETS[@]} -eq 0 ]; then
+  if [ -f "${WORKSPACE_ROOT}/data/raw_dialogs.dvc" ]; then
+    TARGETS=("data/raw_dialogs.dvc" "prepare_data_dialogs" "prepare_few_shots_dialogs")
+  else
+    TARGETS=("prepare_data_dialogs" "prepare_few_shots_dialogs")
+  fi
 fi
+
+apptainer exec \
+  --bind "${WORKSPACE_ROOT}:/repo" \
+  --bind "${HOME}/.aws:${HOME}/.aws" \
+  --pwd /repo \
+  "${AXOLOTL_SANDBOX}" \
+  /repo/.dvc-venv/bin/dvc pull "${TARGETS[@]}"
 
 echo "============================================================"
 echo "[SUCCESS] Dialogs DVC dataset successfully pulled to shared filesystem!"
