@@ -60,7 +60,7 @@ apptainer exec \
   --bind "${HOME}/.aws:${HOME}/.aws" \
   --pwd /repo \
   "${AXOLOTL_SANDBOX}" \
-  /repo/.dvc-venv/bin/dvc pull "${TARGETS[@]}"
+  /repo/.dvc-venv/bin/dvc pull --force "${TARGETS[@]}"
 
 echo "============================================================"
 echo "[SUCCESS] Dialogs DVC dataset successfully pulled to shared filesystem!"
