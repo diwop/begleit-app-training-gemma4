@@ -197,6 +197,23 @@ dvc repro
 dvc repro prepare_data_dialogs
 ```
 
+#### Masked Empty Reasoning Traces (arXiv:2605.21127v1)
+
+To prevent **Reasoning-Trace Collapse** during SFT on translation pairs without thinking traces, `prepare_data.py` formats training records into Axolotl's `input_output` format with segmented loss masking:
+
+* **Delimiters Auto-Detection**: Auto-detects reasoning tags from the tokenizer's chat template, falling back to Gemma 4 native channel tokens (`<|channel>thought\n`, `<channel|>\n`).
+* **Segment 0 (`label: false`)**: Contains the system prompt, user text, turn delimiters, and empty thought channel markers:
+  ```text
+  <start_of_turn>user\n{system_prompt}\n\n{user_text}<end_of_turn>\n<start_of_turn>model\n<|channel>thought\n<channel|>\n
+  ```
+  Masked with `labels = -100` during tokenization.
+* **Segment 1 (`label: true`)**: Contains the target translation and turn completion token:
+  ```text
+  {target_translation}<turn|>\n
+  ```
+  Supervised cross-entropy loss is computed strictly on these tokens.
+* **Backward Compatibility**: Each JSONL record retains `id`, `system`, `user`, `assistant`, and `messages` alongside `segments`.
+
 ---
 
 ## 3. Training Pipelines (Fine-Tuning, Merge & FP8 Quantization)
@@ -261,3 +278,17 @@ Evaluates baseline zero-shot, dynamic few-shot, and fine-tuned merged models on 
   # Batch / Slurm:
   sbatch scripts/submit_evaluation_dialogs.sbatch
   ```
+
+### 4.3 Structural Reasoning Reliability Metrics (arXiv:2605.21127v1)
+
+In addition to text readability scores (`fre`, `wstf`), each sample records its reasoning classification status (`valid`, `empty`, `missing`, `truncated`) across thinking passes:
+* `assistant_gemma4_thinking_reasoning_status`
+* `assistant_gemma4_dynamic_few_shots_reasoning_status`
+* `assistant_gemma4_merged_adapter_8bit_reasoning_status`
+
+Aggregated dataset-level reliability metrics are logged and exported to `data/results-metadata.json`:
+* **VR (Valid Reasoning Rate)**: Percentage of outputs with complete, non-empty reasoning traces.
+* **ER (Empty Reasoning Rate)**: Percentage of outputs with empty or whitespace-only reasoning delimiters.
+* **MR (Missing Reasoning Rate)**: Percentage of outputs with no reasoning tags (collapsed reasoning).
+* **TR (Truncated Reasoning Rate)**: Percentage of outputs where reasoning was opened but never closed.
+

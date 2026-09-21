@@ -28,29 +28,39 @@ os.environ["NCCL_P2P_DISABLE"] = "1"
 os.environ["NCCL_IB_DISABLE"] = "1"
 os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
 
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 
 try:
     import sglang as sgl
+except ImportError:
+    sgl = None
+
+try:
     from transformers import AutoTokenizer
 except ImportError:
-    print("[ERROR] SGLang is not installed in the current environment.", file=sys.stderr)
-    print("[INFO] Please run this script inside the SGLang container (images/sglang_sandbox).", file=sys.stderr)
-    sys.exit(1)
+    AutoTokenizer = None
 
 try:
     import textstat
     textstat.set_lang("de")
 except ImportError:
     textstat = None
-    print("[WARNING] 'textstat' is not installed. Text readability metrics will default to 0.0.", file=sys.stderr)
 
-from dynamic_few_shots import (
-    DynamicFewShotIndex,
-    build_dynamic_few_shot_user_prompt,
-    extract_raw_standardsprache,
-    get_fitting_few_shot_examples,
-)
+try:
+    from dynamic_few_shots import (
+        DynamicFewShotIndex,
+        build_dynamic_few_shot_user_prompt,
+        extract_raw_standardsprache,
+        get_fitting_few_shot_examples,
+    )
+except ImportError:
+    DynamicFewShotIndex = None
+    build_dynamic_few_shot_user_prompt = None
+    extract_raw_standardsprache = None
+    get_fitting_few_shot_examples = None
 
 # Context length and token budgets for SGLang engine
 MAX_SEQUENCE_LENGTH = 32768
@@ -93,6 +103,123 @@ def extract_gemma4_reasoning(text: str) -> tuple[str, str]:
 
     clean_text = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", text).strip()
     return "", clean_text
+
+
+def classify_reasoning_trace(text: str) -> str:
+    """
+    Classifies generated text into structural reasoning categories (arXiv:2605.21127v1):
+      - valid: open and close delimiters present, reasoning non-empty
+      - empty: open and close delimiters present, reasoning empty / whitespace-only
+      - truncated: open delimiter present, but closing delimiter missing
+      - missing: no reasoning delimiter present
+    """
+    if not text:
+        return "missing"
+
+    open_patterns = [
+        r"<\|channel>thought\s*",
+        r"<\|thought\|>\s*",
+        r"<think>\s*",
+    ]
+    close_patterns = [
+        r"<channel\|>",
+        r"<\|channel\|>",
+        r"</thought>",
+        r"</think>",
+    ]
+
+    open_match = None
+    open_end = -1
+    for op in open_patterns:
+        m = re.search(op, text)
+        if m:
+            open_match = m
+            open_end = m.end()
+            break
+
+    if not open_match:
+        return "missing"
+
+    close_match = None
+    close_start = -1
+    text_after_open = text[open_end:]
+    for cp in close_patterns:
+        m = re.search(cp, text_after_open)
+        if m:
+            close_match = m
+            close_start = open_end + m.start()
+            break
+
+    if not close_match:
+        return "truncated"
+
+    reasoning_content = text[open_end:close_start].strip()
+    reasoning_content = re.sub(r"<\|?[a-zA-Z0-9_]+\|?>", "", reasoning_content).strip()
+
+    if len(reasoning_content) > 0:
+        return "valid"
+    return "empty"
+
+
+def extract_output_text(output_obj: object) -> str:
+    """Extract string response from SGLang output item."""
+    if isinstance(output_obj, dict):
+        return output_obj.get("text", "").strip()
+    if hasattr(output_obj, "text"):
+        return output_obj.text.strip()
+    return str(output_obj).strip()
+
+
+def compute_structural_reasoning_metrics(outputs: list[object] | None) -> dict[str, float | int]:
+    """
+    Computes ThinkPack structural reasoning reliability metrics (arXiv:2605.21127v1):
+      VR (Valid Reasoning Rate): fraction with complete, non-empty reasoning
+      ER (Empty Reasoning Rate): fraction with empty reasoning tags
+      MR (Missing Reasoning Rate): fraction with no reasoning tags
+      TR (Truncated Reasoning Rate): fraction with opened but unclosed reasoning tags
+    """
+    if not outputs:
+        return {
+            "total": 0,
+            "valid_count": 0,
+            "empty_count": 0,
+            "missing_count": 0,
+            "truncated_count": 0,
+            "valid_reasoning_rate": 0.0,
+            "empty_reasoning_rate": 0.0,
+            "missing_reasoning_rate": 0.0,
+            "truncated_reasoning_rate": 0.0,
+        }
+
+    total = len(outputs)
+    valid_count = 0
+    empty_count = 0
+    missing_count = 0
+    truncated_count = 0
+
+    for out in outputs:
+        text = extract_output_text(out)
+        status = classify_reasoning_trace(text)
+        if status == "valid":
+            valid_count += 1
+        elif status == "empty":
+            empty_count += 1
+        elif status == "truncated":
+            truncated_count += 1
+        else:
+            missing_count += 1
+
+    return {
+        "total": total,
+        "valid_count": valid_count,
+        "empty_count": empty_count,
+        "missing_count": missing_count,
+        "truncated_count": truncated_count,
+        "valid_reasoning_rate": round((valid_count / total) * 100, 1),
+        "empty_reasoning_rate": round((empty_count / total) * 100, 1),
+        "missing_reasoning_rate": round((missing_count / total) * 100, 1),
+        "truncated_reasoning_rate": round((truncated_count / total) * 100, 1),
+    }
 
 
 def calculate_speed(outputs, elapsed_seconds: float, tokenizer) -> float:
@@ -221,16 +348,15 @@ def get_integrity_checks(default_system_prompt: str) -> list[dict[str, str]]:
     return [i001, i002]
 
 
-def extract_output_text(output_obj: object) -> str:
-    """Extract string response from SGLang output item."""
-    if isinstance(output_obj, dict):
-        return output_obj.get("text", "").strip()
-    if hasattr(output_obj, "text"):
-        return output_obj.text.strip()
-    return str(output_obj).strip()
-
-
 def main() -> None:
+    if sgl is None or AutoTokenizer is None or torch is None:
+        print("[ERROR] SGLang, Transformers, or PyTorch is not installed in the current environment.", file=sys.stderr)
+        print("[INFO] Please run this script inside the SGLang container (images/sglang_sandbox).", file=sys.stderr)
+        sys.exit(1)
+
+    if textstat is None:
+        print("[WARNING] 'textstat' is not installed. Text readability metrics will default to 0.0.", file=sys.stderr)
+
     overall_start_time = time.time()
 
     print("=" * 60)
@@ -524,7 +650,9 @@ def main() -> None:
         fewshot1_original = examples[0]["user_input"] if len(examples) > 0 else None
         fewshot1_assistant = examples[0]["assistant"] if len(examples) > 0 else None
         fewshot2_original = examples[1]["user_input"] if len(examples) > 1 else None
-        fewshot2_assistant = examples[1]["assistant"] if len(examples) > 1 else None
+        status_thinking = classify_reasoning_trace(extract_output_text(thinking_outputs[idx])) if thinking_outputs else None
+        status_few_shots = classify_reasoning_trace(extract_output_text(few_shot_outputs[idx])) if few_shot_outputs else None
+        status_merged_8bit = classify_reasoning_trace(raw_merged_8bit) if merged_adapter_8bit_outputs is not None else None
 
         result_entry = {
             "id": rec["id"],
@@ -542,12 +670,15 @@ def main() -> None:
             "assistant_gemma4": out_no_thinking,
             "assistant_gemma4_metrics": gemma4_metrics,
             "assistant_gemma4_thinking_reasoning": reasoning_trace,
+            "assistant_gemma4_thinking_reasoning_status": status_thinking,
             "assistant_gemma4_thinking": out_thinking,
             "assistant_gemma4_thinking_metrics": gemma4_thinking_metrics,
             "assistant_gemma4_dynamic_few_shots_reasoning": few_shots_reasoning,
+            "assistant_gemma4_dynamic_few_shots_reasoning_status": status_few_shots,
             "assistant_gemma4_dynamic_few_shots": out_few_shots,
             "assistant_gemma4_dynamic_few_shots_metrics": gemma4_few_shots_metrics,
             "assistant_gemma4_merged_adapter_8bit_reasoning": merged_adapter_8bit_reasoning,
+            "assistant_gemma4_merged_adapter_8bit_reasoning_status": status_merged_8bit,
             "assistant_gemma4_merged_adapter_8bit": out_merged_adapter_8bit,
             "assistant_gemma4_merged_adapter_8bit_metrics": gemma4_merged_adapter_8bit_metrics,
         }
@@ -558,6 +689,11 @@ def main() -> None:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     overall_elapsed = time.time() - overall_start_time
+
+    # Compute structural reasoning metrics across full evaluation set
+    struct_metrics_thinking = compute_structural_reasoning_metrics(thinking_outputs)
+    struct_metrics_few_shots = compute_structural_reasoning_metrics(few_shot_outputs)
+    struct_metrics_merged_8bit = compute_structural_reasoning_metrics(merged_adapter_8bit_outputs)
 
     print(f"[SUCCESS] Wrote {len(results)} evaluated results with textstat metrics to: {RESULTS_OUTPUT_PATH}")
     print("=" * 60)
@@ -593,6 +729,14 @@ def main() -> None:
             avg_g4_merged_8bit_wstf = sum(wstf_scores["gemma4_merged_adapter_8bit"]) / len(wstf_scores["gemma4_merged_adapter_8bit"])
             print(f"  * Gemma 4 (Merged 8-bit + Think): FRE = {avg_g4_merged_8bit_fre:.1f}  |  WSTF = {avg_g4_merged_8bit_wstf:.1f}")
 
+    print("\n  --- Structural Reasoning Reliability Metrics (arXiv:2605.21127v1) ---")
+    if struct_metrics_thinking["total"] > 0:
+        print(f"  * Step 2 (Base + Think)         : VR = {struct_metrics_thinking['valid_reasoning_rate']}% | ER = {struct_metrics_thinking['empty_reasoning_rate']}% | MR = {struct_metrics_thinking['missing_reasoning_rate']}% | TR = {struct_metrics_thinking['truncated_reasoning_rate']}%")
+    if struct_metrics_few_shots["total"] > 0:
+        print(f"  * Step 3 (Few-Shot + Think)     : VR = {struct_metrics_few_shots['valid_reasoning_rate']}% | ER = {struct_metrics_few_shots['empty_reasoning_rate']}% | MR = {struct_metrics_few_shots['missing_reasoning_rate']}% | TR = {struct_metrics_few_shots['truncated_reasoning_rate']}%")
+    if struct_metrics_merged_8bit["total"] > 0:
+        print(f"  * Step 4 (Merged 8-bit + Think) : VR = {struct_metrics_merged_8bit['valid_reasoning_rate']}% | ER = {struct_metrics_merged_8bit['empty_reasoning_rate']}% | MR = {struct_metrics_merged_8bit['missing_reasoning_rate']}% | TR = {struct_metrics_merged_8bit['truncated_reasoning_rate']}%")
+
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
 
@@ -617,6 +761,11 @@ def main() -> None:
             "assistant_gemma4_thinking_speed": assistant_gemma4_thinking_speed,
             "assistant_gemma4_dynamic_few_shots_speed": assistant_gemma4_dynamic_few_shots_speed,
             "assistant_gemma4_merged_adapter_8bit_speed": assistant_gemma4_merged_adapter_8bit_speed,
+        },
+        "structural_reasoning_metrics": {
+            "step2_base_thinking": struct_metrics_thinking,
+            "step3_base_few_shots": struct_metrics_few_shots,
+            "step4_merged_adapter_8bit": struct_metrics_merged_8bit,
         },
         "average_metrics": {
             "input_standardsprache": {

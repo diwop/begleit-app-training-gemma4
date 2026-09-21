@@ -20,12 +20,20 @@ def patched_train(cfg, *args, **kwargs):
     print("\n" + "=" * 60)
     print("🔧 MONKEYPATCH: Overriding gradient_checkpointing_kwargs to use_reentrant=True")
     print("This bypasses the DeepSpeed ZeRO-3 parameter sharding metadata mismatch (Size([0]) vs Size([N])).")
-    print("=" * 60 + "\n", flush=True)
+    print("=" * 60, flush=True)
 
     if hasattr(cfg, "gradient_checkpointing_kwargs") and cfg.gradient_checkpointing_kwargs:
         cfg.gradient_checkpointing_kwargs["use_reentrant"] = True
     else:
         cfg.gradient_checkpointing_kwargs = {"use_reentrant": True}
+
+    print("🧠 REASONING PRESERVATION: Verifying input_output loss masking (arXiv:2605.21127v1)...")
+    if getattr(cfg, "train_on_inputs", True) is not False:
+        print("[WARNING] train_on_inputs is not False! Forcing train_on_inputs=False to ensure input_output label:false segments are masked with -100.", flush=True)
+        cfg.train_on_inputs = False
+    else:
+        print("   [OK] train_on_inputs=False verified (segment label:false tokens will be masked with -100).", flush=True)
+    print("=" * 60 + "\n", flush=True)
 
     return original_train(cfg, *args, **kwargs)
 

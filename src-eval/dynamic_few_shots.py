@@ -22,11 +22,13 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 try:
     from sentence_transformers import SentenceTransformer, util
 except ImportError:
-    print("[ERROR] 'sentence-transformers' is not installed in the environment.", file=sys.stderr)
-    print("[INFO] Please run 'bash scripts/download_models.sh' on the login node.", file=sys.stderr)
-    sys.exit(1)
+    SentenceTransformer = None
+    util = None
 
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-base"
 DEFAULT_TRAIN_DATASET = Path("data/dataset_train.jsonl")
@@ -112,6 +114,11 @@ class DynamicFewShotIndex:
         self.dataset_path = Path(dataset_path)
         self.raw_dir = Path(raw_dir)
         self.model_name = model_name
+
+        if SentenceTransformer is None or util is None or torch is None:
+            print("[ERROR] 'sentence-transformers' or 'torch' is not installed in the current environment.", file=sys.stderr)
+            print("[INFO] Please run inside the container with sentence-transformers and PyTorch installed.", file=sys.stderr)
+            sys.exit(1)
 
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"

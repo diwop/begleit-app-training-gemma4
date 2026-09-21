@@ -60,15 +60,12 @@ special_tokens:
 eot_tokens:
   - "<turn|>"
 
-# Dataset Configuration
+# Dataset Configuration (Axolotl input_output with segment-level loss masking for empty reasoning traces, arXiv:2605.21127v1)
 datasets:
   - path: data/dataset_train.jsonl
-    type: chat_template
-    chat_template: tokenizer_default
-    field_messages: messages
-    message_property_mappings:
-      role: role
-      content: content
+    type: input_output
+
+train_on_inputs: false
 
 # Sequence and Batch Dimensions
 sequence_len: 8192
