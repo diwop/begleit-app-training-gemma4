@@ -56,6 +56,106 @@ def count_tokens(text: str, tokenizer=None) -> int:
     return max(1, int(round(max(chars / 3.8, words * 1.35))))
 
 
+def detect_reasoning_delimiters(tokenizer=None) -> tuple[str, str]:
+    """
+    Detects opening and closing reasoning delimiters for the model.
+    Checks tokenizer.chat_template or probe generation, with Gemma 4 native fallback:
+      open_tag:  '<|channel>thought'
+      close_tag: '<channel|>'
+    """
+    default_open = "<|channel>thought"
+    default_close = "<channel|>"
+
+    if tokenizer is None:
+        return default_open, default_close
+
+    chat_template = getattr(tokenizer, "chat_template", None) or ""
+
+    # 1. Check for Gemma 4 native thought channel
+    if "<|channel>thought" in chat_template or "channel" in chat_template:
+        return "<|channel>thought", "<channel|>"
+
+    # 2. Check for XML style <think> / </think>
+    if "<think>" in chat_template:
+        return "<think>", "</think>"
+
+    # 3. Check for bracket style [THINK] / [/THINK]
+    if "[THINK]" in chat_template:
+        return "[THINK]", "[/THINK]"
+
+    # 4. Probe via apply_chat_template if supported
+    if hasattr(tokenizer, "apply_chat_template"):
+        try:
+            probe = tokenizer.apply_chat_template(
+                [{"role": "user", "content": "hello"}],
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=True,
+            )
+            if "<|channel>thought" in probe:
+                return "<|channel>thought", "<channel|>"
+            if "<think>" in probe:
+                return "<think>", "</think>"
+            if "[THINK]" in probe:
+                return "[THINK]", "[/THINK]"
+        except Exception:
+            pass
+
+    return default_open, default_close
+
+
+def format_input_output_segments(
+    system_prompt: str,
+    user_prompt: str,
+    assistant_text: str,
+    tokenizer=None,
+    open_tag: str = "<|channel>thought",
+    close_tag: str = "<channel|>",
+    turn_token: str = "<turn|>",
+) -> list[dict[str, bool | str]]:
+    """
+    Formats training example into Axolotl input_output segments with masked empty reasoning traces.
+    Segment 0 (label: False): Prompt and empty reasoning tags (masked with -100).
+    Segment 1 (label: True): Target assistant response and turn ending (trained).
+    """
+    rendered_prompt = None
+    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+        try:
+            conv = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            rendered_prompt = tokenizer.apply_chat_template(
+                conv,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            rendered_prompt = None
+
+    if not rendered_prompt:
+        rendered_prompt = (
+            f"<start_of_turn>user\n{system_prompt}\n\n{user_prompt}<end_of_turn>\n"
+            f"<start_of_turn>model\n"
+        )
+
+    prompt_str = rendered_prompt.rstrip("\n")
+    open_tag_clean = open_tag.strip()
+    close_tag_clean = close_tag.strip()
+
+    if prompt_str.endswith(open_tag_clean):
+        segment0_text = f"{rendered_prompt.rstrip()}\n{close_tag_clean}\n"
+    else:
+        segment0_text = f"{rendered_prompt.rstrip()}\n{open_tag_clean}\n{close_tag_clean}\n"
+
+    segment1_text = f"{assistant_text.strip()}{turn_token}\n"
+
+    return [
+        {"label": False, "text": segment0_text},
+        {"label": True, "text": segment1_text},
+    ]
+
+
 def compute_distribution(lengths: list[int]) -> dict[str, float | int]:
     """Calculate descriptive statistics for a list of token counts."""
     if not lengths:
@@ -115,6 +215,9 @@ def main() -> None:
     system_token_count = count_tokens(system_prompt, tokenizer)
     print(f"[INFO] System Prompt Tokens: {system_token_count}")
 
+    open_tag, close_tag = detect_reasoning_delimiters(tokenizer)
+    print(f"[INFO] Reasoning Delimiters    : Open='{open_tag.strip()}', Close='{close_tag.strip()}' (arXiv:2605.21127v1)")
+
     records = []
     filtered_outliers = []
     user_tokens = []
@@ -144,8 +247,18 @@ def main() -> None:
         assistant_tokens.append(a_tok)
         total_tokens.append(tot_tok)
 
+        segments = format_input_output_segments(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            assistant_text=ls_text,
+            tokenizer=tokenizer,
+            open_tag=open_tag,
+            close_tag=close_tag,
+        )
+
         records.append({
             "id": doc_id,
+            "segments": segments,
             "system": system_prompt,
             "user": user_prompt,
             "assistant": ls_text,
@@ -172,12 +285,38 @@ def main() -> None:
     write_jsonl(TRAIN_OUTPUT, train_records)
     write_jsonl(EVAL_OUTPUT, eval_records)
 
+    if train_records:
+        sample_seg = train_records[0]["segments"]
+        print("\n" + "=" * 60)
+        print("      Sample 0 Masking Verification Preview (Axolotl input_output)")
+        print("=" * 60)
+        print(f"[MASKED - label: {sample_seg[0]['label']}] (Prompt + Empty Reasoning Delimiters):")
+        print("-" * 40)
+        preview_prompt = sample_seg[0]["text"]
+        if len(preview_prompt) > 300:
+            print(preview_prompt[:150] + "\n...\n" + preview_prompt[-150:])
+        else:
+            print(preview_prompt)
+        print("-" * 40)
+        print(f"[TRAINED - label: {sample_seg[1]['label']}] (Target Translation + Turn Ending):")
+        print("-" * 40)
+        preview_resp = sample_seg[1]["text"]
+        if len(preview_resp) > 300:
+            print(preview_resp[:150] + "\n...\n" + preview_resp[-150:])
+        else:
+            print(preview_resp)
+        print("=" * 60)
+
     dist_user = compute_distribution(user_tokens)
     dist_assistant = compute_distribution(assistant_tokens)
     dist_total = compute_distribution(total_tokens)
 
     print(f"\n[SUCCESS] Wrote {len(train_records)} train samples to {TRAIN_OUTPUT}")
     print(f"[SUCCESS] Wrote {len(eval_records)} eval samples to {EVAL_OUTPUT}")
+
+    if not user_tokens:
+        print("[WARNING] No valid document pairs found in data/raw. Run 'dvc pull' or 'bash scripts/pull_data.sh' to fetch raw text pairs.")
+        return
 
     # Print clean summary table to console
     print("\n" + "=" * 60)
