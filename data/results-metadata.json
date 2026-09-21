@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-09-02T12:07:06Z",
+  "total_samples": 79,
+  "total_evaluation_time_seconds": 1827.25,
+  "phase_elapsed_seconds": {
+    "step1_base_zero_shot": 70.23,
+    "step2_base_thinking": 637.88,
+    "step3_base_few_shots": 835.46,
+    "step4_merged_adapter_8bit": 135.14
+  },
+  "model_speeds_tokens_per_second": {
+    "assistant_gemma4_speed": 598.83,
+    "assistant_gemma4_thinking_speed": 516.59,
+    "assistant_gemma4_dynamic_few_shots_speed": 348.79,
+    "assistant_gemma4_merged_adapter_8bit_speed": 370.35
+  },
+  "average_metrics": {
+    "input_standardsprache": {
+      "fre": 42.9,
+      "wstf": 10.6
+    },
+    "ground_truth": {
+      "fre": 64.9,
+      "wstf": 6.3
+    },
+    "assistant_gemma4": {
+      "fre": 71.0,
+      "wstf": 5.4,
+      "speed_tokens_per_sec": 598.83
+    },
+    "assistant_gemma4_thinking": {
+      "fre": 72.8,
+      "wstf": 5.1,
+      "speed_tokens_per_sec": 516.59
+    },
+    "assistant_gemma4_dynamic_few_shots": {
+      "fre": 71.8,
+      "wstf": 5.2,
+      "speed_tokens_per_sec": 348.79
+    },
+    "assistant_gemma4_merged_adapter_8bit": {
+      "fre": 65.0,
+      "wstf": 6.5,
+      "speed_tokens_per_sec": 370.35
+    }
+  }
+}
