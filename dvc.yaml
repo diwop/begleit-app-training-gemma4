@@ -15,13 +15,19 @@ stages:
     deps:
       - prompts/system-prompt_dialogs.md
       - prompts/prompt-template_dialogs.md
-      - prompts/prompt-template-dynamic-few-shots_dialogs_sample.md
       - data/raw_dialogs
       - src-train/prepare_data_dialogs.py
     outs:
       - data/dataset_train_dialogs.jsonl
       - data/dataset_eval_dialogs.jsonl
-      - data/dataset_full_dialogs.jsonl
+
+  prepare_few_shots_dialogs:
+    cmd: python3 src-eval/prepare_few_shots_dialogs.py
+    deps:
+      - prompts/prompt-template-dynamic-few-shots_dialogs_sample.md
+      - data/raw_dialogs
+      - src-eval/prepare_few_shots_dialogs.py
+    outs:
       - data/few_shots_dialogs_train_0.jsonl
       - data/few_shots_dialogs_train_1.jsonl
       - data/few_shots_dialogs_train_2.jsonl
@@ -40,4 +46,3 @@ stages:
       - data/few_shots_dialogs_full_3.jsonl
       - data/few_shots_dialogs_full_4.jsonl
       - data/few_shots_dialogs_full_5.jsonl
-

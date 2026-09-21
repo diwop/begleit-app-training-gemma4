@@ -29,23 +29,8 @@ MAX_SEQUENCE_LENGTH = 8192
 RAW_DIR = Path("data/raw_dialogs")
 SYSTEM_PROMPT_PATH = Path("prompts/system-prompt_dialogs.md")
 PROMPT_TEMPLATE_PATH = Path("prompts/prompt-template_dialogs.md")
-FEW_SHOTS_SAMPLE_TEMPLATE_PATH = Path(
-    "prompts/prompt-template-dynamic-few-shots_dialogs_sample.md"
-)
 TRAIN_OUTPUT = Path("data/dataset_train_dialogs.jsonl")
 EVAL_OUTPUT = Path("data/dataset_eval_dialogs.jsonl")
-FULL_OUTPUT = Path("data/dataset_full_dialogs.jsonl")
-
-FEW_SHOTS_TRAIN_OUTPUTS = [
-    Path(f"data/few_shots_dialogs_train_{i}.jsonl") for i in range(6)
-]
-FEW_SHOTS_EVAL_OUTPUTS = [
-    Path(f"data/few_shots_dialogs_eval_{i}.jsonl") for i in range(6)
-]
-FEW_SHOTS_FULL_OUTPUTS = [
-    Path(f"data/few_shots_dialogs_full_{i}.jsonl") for i in range(6)
-]
-
 EVAL_RATIO = 0.10
 SEED = 42
 
@@ -217,117 +202,6 @@ def extract_partner_exchanges(
     return exchanges
 
 
-def extract_few_shot_buckets(
-    files: list[Path],
-    sample_template: str,
-    tokenizer=None,
-) -> dict[int, list[dict[str, Any]]]:
-    """
-    Extracts partner turns into 6 history-length buckets:
-    - Bucket 0: history_len == 0 (starts of discussion where partner started)
-    - Bucket 1: history_len == 1 (starts of discussion with first partner text when user started)
-    - Bucket 2: history_len == 2
-    - Bucket 3: history_len == 3
-    - Bucket 4: history_len == 4
-    - Bucket 5: history_len >= 5 (history capped to the last 5 turns)
-
-    Format of each record:
-    {
-      "id": ...,
-      "dialog": ...,
-      "exchange_idx": ...,
-      "turn_idx": ...,
-      "input": "...",
-      "sample": "...",
-      "tokens": ...
-    }
-    """
-    buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(6)}
-
-    for f in sorted(files, key=lambda x: x.name):
-        turns = parse_dialog_file(f)
-        partner_count = 0
-        doc_stem = f.stem
-
-        for idx, turn in enumerate(turns):
-            if turn["speaker"] == "partner":
-                history_len = idx  # number of preceding turns
-                bucket_idx = min(history_len, 5)
-
-                if bucket_idx == 5:
-                    turns_for_history = turns[:idx][-5:]
-                else:
-                    turns_for_history = turns[:idx]
-
-                history_str = format_history(turns_for_history)
-                sample_text = (
-                    sample_template.replace("%FEW_SHOT_HISTORY%", history_str)
-                    .replace("%FEW_SHOT_INPUT%", turn["text"])
-                    .replace("%FEW_SHOT_OUTPUT%", turn["translation"])
-                )
-                tok_count = count_tokens(sample_text, tokenizer)
-                sample_id = f"{doc_stem}_{partner_count:02d}"
-
-                record = {
-                    "id": sample_id,
-                    "dialog": f.name,
-                    "exchange_idx": partner_count,
-                    "turn_idx": idx,
-                    "input": turn["text"],
-                    "sample": sample_text,
-                    "tokens": tok_count,
-                }
-                buckets[bucket_idx].append(record)
-                partner_count += 1
-
-    return buckets
-
-
-def extract_full_dialog_records(
-    files: list[Path],
-    system_prompt: str,
-    template: str,
-) -> list[dict[str, Any]]:
-    """
-    Extracts all partner exchanges across the given files in full chat format.
-    """
-    records = []
-    for f in sorted(files, key=lambda x: x.name):
-        turns = parse_dialog_file(f)
-        partner_count = 0
-        doc_stem = f.stem
-
-        for idx, turn in enumerate(turns):
-            if turn["speaker"] == "partner":
-                history_str = format_history(turns[:idx])
-                user_prompt = template.replace("%HISTORY%", history_str).replace(
-                    "%INPUT%", turn["text"]
-                )
-                assistant_text = turn["translation"]
-                sample_id = f"{doc_stem}_{partner_count:02d}"
-
-                records.append({
-                    "id": sample_id,
-                    "dialog": f.name,
-                    "exchange_idx": partner_count,
-                    "turn_idx": idx,
-                    "system": system_prompt,
-                    "history": history_str,
-                    "user_input": turn["text"],
-                    "assistant": assistant_text,
-                    "kind": turn["kind"],
-                    "user": user_prompt,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                        {"role": "assistant", "content": assistant_text},
-                    ],
-                })
-                partner_count += 1
-
-    return records
-
-
 def select_training_exchange_indices(num_exchanges: int) -> list[int]:
     """
     Selects 4 sample indices for training:
@@ -370,18 +244,8 @@ def main() -> None:
         )
         sys.exit(1)
 
-    if not FEW_SHOTS_SAMPLE_TEMPLATE_PATH.exists():
-        print(
-            f"[ERROR] Sample template file not found at: {FEW_SHOTS_SAMPLE_TEMPLATE_PATH}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
     system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").strip()
     template = PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").strip()
-    sample_template = FEW_SHOTS_SAMPLE_TEMPLATE_PATH.read_text(
-        encoding="utf-8"
-    ).strip()
 
     if not RAW_DIR.exists():
         RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -399,12 +263,7 @@ def main() -> None:
         )
         write_jsonl(TRAIN_OUTPUT, [])
         write_jsonl(EVAL_OUTPUT, [])
-        write_jsonl(FULL_OUTPUT, [])
-        for i in range(6):
-            write_jsonl(FEW_SHOTS_TRAIN_OUTPUTS[i], [])
-            write_jsonl(FEW_SHOTS_EVAL_OUTPUTS[i], [])
-            write_jsonl(FEW_SHOTS_FULL_OUTPUTS[i], [])
-        print(f"[SUCCESS] Initialized empty outputs in {RAW_DIR.parent}")
+        print(f"[SUCCESS] Initialized empty {TRAIN_OUTPUT} and {EVAL_OUTPUT}")
         return
 
     # Split dialog files as complete wholes into train and eval sets
@@ -573,64 +432,14 @@ def main() -> None:
     write_jsonl(TRAIN_OUTPUT, train_records)
     write_jsonl(EVAL_OUTPUT, eval_records)
 
+    dist_user = compute_distribution(user_tokens)
+    dist_assistant = compute_distribution(assistant_tokens)
+    dist_total = compute_distribution(total_tokens)
+
     print(
         f"\n[SUCCESS] Wrote {len(train_records)} train samples to {TRAIN_OUTPUT}"
     )
     print(f"[SUCCESS] Wrote {len(eval_records)} eval samples to {EVAL_OUTPUT}")
-
-    # Extract few-shot buckets for train, eval, and full splits
-    buckets_train = extract_few_shot_buckets(
-        train_files, sample_template, tokenizer=tokenizer
-    )
-    buckets_eval = extract_few_shot_buckets(
-        eval_files, sample_template, tokenizer=tokenizer
-    )
-    buckets_full = extract_few_shot_buckets(
-        raw_files, sample_template, tokenizer=tokenizer
-    )
-
-    full_records = extract_full_dialog_records(
-        raw_files, system_prompt, template
-    )
-    full_records_sorted = sorted(full_records, key=lambda r: r["id"])
-    write_jsonl(FULL_OUTPUT, full_records_sorted)
-    print(f"[SUCCESS] Wrote {len(full_records_sorted)} full dialog samples to {FULL_OUTPUT}")
-
-    for i in range(6):
-        write_jsonl(FEW_SHOTS_TRAIN_OUTPUTS[i], buckets_train[i])
-        write_jsonl(FEW_SHOTS_EVAL_OUTPUTS[i], buckets_eval[i])
-        write_jsonl(FEW_SHOTS_FULL_OUTPUTS[i], buckets_full[i])
-
-    print("\n" + "=" * 60)
-    print("      Few-Shot Dialogs Buckets Summary")
-    print("=" * 60)
-    print(
-        f"{'Bucket':<8} | {'History Description':<22} | {'Train':<7} | {'Eval':<6} | {'Full':<6}"
-    )
-    print("-" * 60)
-    for i in range(6):
-        desc = (
-            "0 (partner started)"
-            if i == 0
-            else (
-                "1 (user started)"
-                if i == 1
-                else (f"{i} turns" if i < 5 else ">= 5 turns (capped)")
-            )
-        )
-        print(
-            f"Bucket {i:<1} | {desc:<22} | {len(buckets_train[i]):<7} | {len(buckets_eval[i]):<6} | {len(buckets_full[i]):<6}"
-        )
-    print("-" * 60)
-    total_train_fs = sum(len(b) for b in buckets_train.values())
-    total_eval_fs = sum(len(b) for b in buckets_eval.values())
-    total_full_fs = sum(len(b) for b in buckets_full.values())
-    print(
-        f"{'Total':<8} | {'All partner turns':<22} | {total_train_fs:<7} | {total_eval_fs:<6} | {total_full_fs:<6}"
-    )
-    dist_user = compute_distribution(user_tokens)
-    dist_assistant = compute_distribution(assistant_tokens)
-    dist_total = compute_distribution(total_tokens)
 
     # Print summary table
     print("\n" + "=" * 60)

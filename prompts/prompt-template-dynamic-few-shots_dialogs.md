@@ -5,7 +5,10 @@ Hier sind Beispiele für Übersetzungen von Dialogen in Leichte Sprache:
 # Deine Übersetzung
 
 Bisheriger Dialog:
+
+```history
 %HISTORY%
+```
 
 Übersetze nun den folgenden Text in `input` in leichte Sprache.
 Gib exakt nur die Übersetzung aus ohne weitere Kommentare.

@@ -59,6 +59,8 @@ except ImportError:
 
 from dynamic_few_shots_dialogs import (
     build_dynamic_few_shot_user_prompt,
+    count_turns_in_history,
+    determine_bucket,
     get_fitting_few_shot_examples,
 )
 
@@ -343,13 +345,17 @@ def main() -> None:
         else:
             raw_user_in = rec.get("user_input", "") or rec["user"]
             history_in = rec.get("history", "keine Historie")
+            bucket = determine_bucket(rec)
+            dialog_name = rec.get("dialog")
+
             fitting_examples = get_fitting_few_shot_examples(
                 query=raw_user_in,
                 tokenizer=tokenizer,
                 query_history=history_in,
+                bucket=bucket,
                 max_input_tokens=MAX_INPUT_TOKENS,
-                max_examples=2,
-                dataset_path=TRAIN_DATA_PATH,
+                max_examples=4,
+                exclude_dialog=dialog_name,
             )
             few_shot_user_prompt = build_dynamic_few_shot_user_prompt(
                 raw_user_in, fitting_examples, query_history=history_in
@@ -358,7 +364,7 @@ def main() -> None:
                 tokenizer.encode(few_shot_user_prompt, add_special_tokens=False)
             )
             print(
-                f"[INFO] Sample '{rec['id']}': retrieved"
+                f"[INFO] Sample '{rec['id']}' (Bucket {bucket}): retrieved"
                 f" {len(fitting_examples)} few-shot demonstrations"
                 f" ({token_count} tokens)."
             )
@@ -474,7 +480,7 @@ def main() -> None:
         f" ({step2_elapsed/len(records):.2f}s/sample)\n"
     )
 
-    # STEP 3: Dynamic Few-Shot WITH thinking (2 semantically closest demonstrations)
+    # STEP 3: Dynamic Few-Shot WITH thinking (up to 4 semantically closest demonstrations from history bucket)
     print("=" * 60)
     print(
         "[STEP 3/4] Running Dynamic Few-Shot WITH thinking on Base Model for"
@@ -653,11 +659,31 @@ def main() -> None:
         fewshot2_assistant = (
             examples[1]["assistant"] if len(examples) > 1 else None
         )
+        fewshot3_original = (
+            examples[2]["user_input"] if len(examples) > 2 else None
+        )
+        fewshot3_assistant = (
+            examples[2]["assistant"] if len(examples) > 2 else None
+        )
+        fewshot4_original = (
+            examples[3]["user_input"] if len(examples) > 3 else None
+        )
+        fewshot4_assistant = (
+            examples[3]["assistant"] if len(examples) > 3 else None
+        )
+
+        history_val = rec.get("history", "keine Historie")
+        bucket_val = determine_bucket(rec)
 
         result_entry = {
             "id": rec["id"],
+            "dialog": rec.get("dialog", ""),
+            "exchange_idx": rec.get("exchange_idx"),
+            "turn_idx": rec.get("turn_idx"),
+            "bucket": bucket_val,
+            "num_few_shots": len(examples),
             "system": rec["system"],
-            "history": rec.get("history", "keine Historie"),
+            "history": history_val,
             "user_input": raw_user_input,
             "user_input_metrics": user_metrics,
             "user": rec["user"],
@@ -666,6 +692,10 @@ def main() -> None:
             "fewshot1_assistant": fewshot1_assistant,
             "fewshot2_original": fewshot2_original,
             "fewshot2_assistant": fewshot2_assistant,
+            "fewshot3_original": fewshot3_original,
+            "fewshot3_assistant": fewshot3_assistant,
+            "fewshot4_original": fewshot4_original,
+            "fewshot4_assistant": fewshot4_assistant,
             "assistant": rec["assistant"],
             "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,

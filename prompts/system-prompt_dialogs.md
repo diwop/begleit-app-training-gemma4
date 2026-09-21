@@ -72,7 +72,3 @@ In der wörtlichen Rede darfst du eine reduzierte Markdown-Syntax verwenden:
 
 Setze Formatierungen so, dass sie Lesbarkeit und Verständnis erhöhen, nicht beeinträchtigen.
 Fange nicht mit einer Überschrift an. Nur Zwischenüberschriften sind erlaubt, wenn sie sinnvoll sind.
-
-# Beispiele
-
-%translate-dialog-partner-few-shots.md%
