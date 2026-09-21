@@ -40,9 +40,4 @@ stages:
       - data/few_shots_dialogs_full_3.jsonl
       - data/few_shots_dialogs_full_4.jsonl
       - data/few_shots_dialogs_full_5.jsonl
-      - data/few_shots_dialogs_0.jsonl
-      - data/few_shots_dialogs_1.jsonl
-      - data/few_shots_dialogs_2.jsonl
-      - data/few_shots_dialogs_3.jsonl
-      - data/few_shots_dialogs_4.jsonl
-      - data/few_shots_dialogs_5.jsonl
+

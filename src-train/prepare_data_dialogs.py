@@ -45,9 +45,6 @@ FEW_SHOTS_EVAL_OUTPUTS = [
 FEW_SHOTS_FULL_OUTPUTS = [
     Path(f"data/few_shots_dialogs_full_{i}.jsonl") for i in range(6)
 ]
-FEW_SHOTS_DEFAULT_OUTPUTS = [
-    Path(f"data/few_shots_dialogs_{i}.jsonl") for i in range(6)
-]
 
 EVAL_RATIO = 0.10
 SEED = 42
@@ -407,7 +404,6 @@ def main() -> None:
             write_jsonl(FEW_SHOTS_TRAIN_OUTPUTS[i], [])
             write_jsonl(FEW_SHOTS_EVAL_OUTPUTS[i], [])
             write_jsonl(FEW_SHOTS_FULL_OUTPUTS[i], [])
-            write_jsonl(FEW_SHOTS_DEFAULT_OUTPUTS[i], [])
         print(f"[SUCCESS] Initialized empty outputs in {RAW_DIR.parent}")
         return
 
@@ -604,7 +600,6 @@ def main() -> None:
         write_jsonl(FEW_SHOTS_TRAIN_OUTPUTS[i], buckets_train[i])
         write_jsonl(FEW_SHOTS_EVAL_OUTPUTS[i], buckets_eval[i])
         write_jsonl(FEW_SHOTS_FULL_OUTPUTS[i], buckets_full[i])
-        write_jsonl(FEW_SHOTS_DEFAULT_OUTPUTS[i], buckets_full[i])
 
     print("\n" + "=" * 60)
     print("      Few-Shot Dialogs Buckets Summary")
