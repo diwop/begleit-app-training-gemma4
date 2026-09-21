@@ -137,8 +137,33 @@ def test_format_input_output_segments_with_tokenizer():
     assert segments[0]["label"] is False
     assert segments[1]["label"] is True
     assert "<|channel>thought" in segments[0]["text"]
-    assert "<channel|>" in segments[0]["text"]
     assert segments[1]["text"] == "Target Translation<turn|>\n"
+
+
+class MockTokenizerWithFullGemma4Template:
+    """Simulates Gemma 4 tokenizer where apply_chat_template(add_generation_prompt=True) produces <|channel>thought\n<channel|>."""
+    def apply_chat_template(self, conversation, tokenize=False, add_generation_prompt=False):
+        return "<bos><|turn>system\nSystem<turn|>\n<|turn>user\nUser<turn|>\n<|turn>model\n<|channel>thought\n<channel|>"
+
+
+def test_format_input_output_segments_with_full_delimiters_template():
+    """Verify segment generation does not duplicate empty thought tags when template already emits them."""
+    tokenizer = MockTokenizerWithFullGemma4Template()
+    segments = format_input_output_segments(
+        system_prompt="System",
+        user_prompt="User",
+        assistant_text="Target",
+        tokenizer=tokenizer,
+        open_tag="<|channel>thought",
+        close_tag="<channel|>",
+        turn_token="<turn|>",
+    )
+    assert len(segments) == 2
+    assert segments[0]["text"].count("<|channel>thought") == 1
+    assert segments[0]["text"].count("<channel|>") == 1
+    assert segments[0]["label"] is False
+    assert segments[1]["label"] is True
+    assert segments[1]["text"] == "Target<turn|>\n"
 
 
 def test_classify_reasoning_trace_gemma4():
@@ -212,6 +237,7 @@ if __name__ == "__main__":
     test_detect_reasoning_delimiters_think_tags()
     test_format_input_output_segments_structure()
     test_format_input_output_segments_with_tokenizer()
+    test_format_input_output_segments_with_full_delimiters_template()
     test_classify_reasoning_trace_gemma4()
     test_classify_reasoning_trace_alternative_delimiters()
     test_compute_structural_reasoning_metrics()

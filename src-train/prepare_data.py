@@ -143,10 +143,12 @@ def format_input_output_segments(
     open_tag_clean = open_tag.strip()
     close_tag_clean = close_tag.strip()
 
-    if prompt_str.endswith(open_tag_clean):
-        segment0_text = f"{rendered_prompt.rstrip()}\n{close_tag_clean}\n"
+    if prompt_str.endswith(close_tag_clean):
+        segment0_text = f"{prompt_str}\n"
+    elif prompt_str.endswith(open_tag_clean):
+        segment0_text = f"{prompt_str}\n{close_tag_clean}\n"
     else:
-        segment0_text = f"{rendered_prompt.rstrip()}\n{open_tag_clean}\n{close_tag_clean}\n"
+        segment0_text = f"{prompt_str}\n{open_tag_clean}\n{close_tag_clean}\n"
 
     segment1_text = f"{assistant_text.strip()}{turn_token}\n"
 
