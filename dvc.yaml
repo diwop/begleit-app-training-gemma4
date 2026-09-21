@@ -20,3 +20,28 @@ stages:
     outs:
       - data/dataset_train_dialogs.jsonl
       - data/dataset_eval_dialogs.jsonl
+      - data/dataset_full_dialogs.jsonl
+      - data/few_shots_dialogs_train_0.jsonl
+      - data/few_shots_dialogs_train_1.jsonl
+      - data/few_shots_dialogs_train_2.jsonl
+      - data/few_shots_dialogs_train_3.jsonl
+      - data/few_shots_dialogs_train_4.jsonl
+      - data/few_shots_dialogs_train_5.jsonl
+      - data/few_shots_dialogs_eval_0.jsonl
+      - data/few_shots_dialogs_eval_1.jsonl
+      - data/few_shots_dialogs_eval_2.jsonl
+      - data/few_shots_dialogs_eval_3.jsonl
+      - data/few_shots_dialogs_eval_4.jsonl
+      - data/few_shots_dialogs_eval_5.jsonl
+      - data/few_shots_dialogs_full_0.jsonl
+      - data/few_shots_dialogs_full_1.jsonl
+      - data/few_shots_dialogs_full_2.jsonl
+      - data/few_shots_dialogs_full_3.jsonl
+      - data/few_shots_dialogs_full_4.jsonl
+      - data/few_shots_dialogs_full_5.jsonl
+      - data/few_shots_dialogs_0.jsonl
+      - data/few_shots_dialogs_1.jsonl
+      - data/few_shots_dialogs_2.jsonl
+      - data/few_shots_dialogs_3.jsonl
+      - data/few_shots_dialogs_4.jsonl
+      - data/few_shots_dialogs_5.jsonl

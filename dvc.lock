@@ -52,15 +52,115 @@ stages:
       size: 5082
     - path: src-train/prepare_data_dialogs.py
       hash: md5
-      md5: d3e77535a77ac547e74d81c686269e6f
-      size: 16233
+      md5: bfabf283db7d303b43c161d83775eeb0
+      size: 21497
       isexec: true
     outs:
     - path: data/dataset_eval_dialogs.jsonl
       hash: md5
       md5: 81031c7bb94a0d7752deaf355d0b226a
       size: 724286
+    - path: data/dataset_full_dialogs.jsonl
+      hash: md5
+      md5: 1c9ad2f3adc8c350e7914ba20b82fe31
+      size: 6146225
     - path: data/dataset_train_dialogs.jsonl
       hash: md5
       md5: b81aac3bb1d35cebce51be99a725374c
       size: 3523382
+    - path: data/few_shots_dialogs_0.jsonl
+      hash: md5
+      md5: f76cc8789ba9cbf529991c111a8ef143
+      size: 282516
+    - path: data/few_shots_dialogs_1.jsonl
+      hash: md5
+      md5: 7e666c60a718c87d34b68d2ce9593b21
+      size: 418420
+    - path: data/few_shots_dialogs_2.jsonl
+      hash: md5
+      md5: cf495b54fb671310a6a2600eeb4f9516
+      size: 308308
+    - path: data/few_shots_dialogs_3.jsonl
+      hash: md5
+      md5: c9578352c31a1c03718c8ab163feb784
+      size: 475525
+    - path: data/few_shots_dialogs_4.jsonl
+      hash: md5
+      md5: 80a87181940f34932fd0c4d60f3b51ba
+      size: 352100
+    - path: data/few_shots_dialogs_5.jsonl
+      hash: md5
+      md5: c478244e7b67ecd5ec08bba728c5b852
+      size: 4309356
+    - path: data/few_shots_dialogs_eval_0.jsonl
+      hash: md5
+      md5: e1b9f66cd7b175e30af2af6ce7deaf3c
+      size: 12064
+    - path: data/few_shots_dialogs_eval_1.jsonl
+      hash: md5
+      md5: 720bd1b232b8e8d169f06c7e62f63a5d
+      size: 61511
+    - path: data/few_shots_dialogs_eval_2.jsonl
+      hash: md5
+      md5: dd0ffeffdeed05b3e12f49f6336ac9c1
+      size: 13898
+    - path: data/few_shots_dialogs_eval_3.jsonl
+      hash: md5
+      md5: 93a3130146dc0d564bd7fa4eb1f62ecf
+      size: 69449
+    - path: data/few_shots_dialogs_eval_4.jsonl
+      hash: md5
+      md5: 2270903942f816d1d75f764e7fc4cf12
+      size: 15409
+    - path: data/few_shots_dialogs_eval_5.jsonl
+      hash: md5
+      md5: 734154414f190b7d50875a08e6cea2b0
+      size: 443975
+    - path: data/few_shots_dialogs_full_0.jsonl
+      hash: md5
+      md5: f76cc8789ba9cbf529991c111a8ef143
+      size: 282516
+    - path: data/few_shots_dialogs_full_1.jsonl
+      hash: md5
+      md5: 7e666c60a718c87d34b68d2ce9593b21
+      size: 418420
+    - path: data/few_shots_dialogs_full_2.jsonl
+      hash: md5
+      md5: cf495b54fb671310a6a2600eeb4f9516
+      size: 308308
+    - path: data/few_shots_dialogs_full_3.jsonl
+      hash: md5
+      md5: c9578352c31a1c03718c8ab163feb784
+      size: 475525
+    - path: data/few_shots_dialogs_full_4.jsonl
+      hash: md5
+      md5: 80a87181940f34932fd0c4d60f3b51ba
+      size: 352100
+    - path: data/few_shots_dialogs_full_5.jsonl
+      hash: md5
+      md5: c478244e7b67ecd5ec08bba728c5b852
+      size: 4309356
+    - path: data/few_shots_dialogs_train_0.jsonl
+      hash: md5
+      md5: 0d3ad89c65788be62975200dd252a5e5
+      size: 270475
+    - path: data/few_shots_dialogs_train_1.jsonl
+      hash: md5
+      md5: 766dd7e174bd8b9addd2f9ba49de3650
+      size: 356938
+    - path: data/few_shots_dialogs_train_2.jsonl
+      hash: md5
+      md5: ab3ad6a738733544b3f20c021c201444
+      size: 294432
+    - path: data/few_shots_dialogs_train_3.jsonl
+      hash: md5
+      md5: f90d6e5ab3c38afca2c5e89fff94d66a
+      size: 406105
+    - path: data/few_shots_dialogs_train_4.jsonl
+      hash: md5
+      md5: e68b9b4d55ad8861702c80d27a2f83b9
+      size: 336713
+    - path: data/few_shots_dialogs_train_5.jsonl
+      hash: md5
+      md5: 490dc394b57f92fb2593c81ce2da2fae
+      size: 3865621
