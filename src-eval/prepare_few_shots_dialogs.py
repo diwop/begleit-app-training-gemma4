@@ -211,10 +211,11 @@ def extract_few_shot_buckets(
                     turns_for_history = turns[:idx]
 
                 history_str = format_history(turns_for_history)
+                few_shot_output = f"{turn['kind']}\n{turn['translation']}"
                 sample_text = (
                     sample_template.replace("%FEW_SHOT_HISTORY%", history_str)
                     .replace("%FEW_SHOT_INPUT%", turn["text"])
-                    .replace("%FEW_SHOT_OUTPUT%", turn["translation"])
+                    .replace("%FEW_SHOT_OUTPUT%", few_shot_output)
                 )
                 tok_count = count_tokens(sample_text, tokenizer)
                 sample_id = f"{doc_stem}_{partner_count:02d}"
@@ -224,7 +225,11 @@ def extract_few_shot_buckets(
                     "dialog": f.name,
                     "exchange_idx": partner_count,
                     "turn_idx": idx,
+                    "kind": turn["kind"],
                     "input": turn["text"],
+                    "user_input": turn["text"],
+                    "output": few_shot_output,
+                    "assistant": few_shot_output,
                     "sample": sample_text,
                     "tokens": tok_count,
                 }

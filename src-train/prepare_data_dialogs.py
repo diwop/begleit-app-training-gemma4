@@ -319,7 +319,7 @@ def main() -> None:
             user_prompt = template.replace("%HISTORY%", ex["history"]).replace(
                 "%INPUT%", ex["partner_text"]
             )
-            assistant_text = ex["partner_translation"]
+            assistant_text = f"{ex['kind']}\n{ex['partner_translation']}"
             sample_id = f"{doc_stem}_{j:02d}"
 
             u_tok = count_tokens(user_prompt, tokenizer)
@@ -347,6 +347,7 @@ def main() -> None:
                 "id": sample_id,
                 "dialog": f.name,
                 "exchange_idx": j,
+                "kind": ex["kind"],
                 "system": system_prompt,
                 "history": ex["history"],
                 "user_input": ex["partner_text"],
@@ -374,7 +375,7 @@ def main() -> None:
             user_prompt = template.replace("%HISTORY%", ex["history"]).replace(
                 "%INPUT%", ex["partner_text"]
             )
-            assistant_text = ex["partner_translation"]
+            assistant_text = f"{ex['kind']}\n{ex['partner_translation']}"
             sample_id = f"{doc_stem}_{j:02d}"
 
             u_tok = count_tokens(user_prompt, tokenizer)
@@ -402,6 +403,7 @@ def main() -> None:
                 "id": sample_id,
                 "dialog": f.name,
                 "exchange_idx": j,
+                "kind": ex["kind"],
                 "system": system_prompt,
                 "history": ex["history"],
                 "user_input": ex["partner_text"],
