@@ -245,7 +245,7 @@ class DynamicFewShotIndex:
     def get_closest_examples(
         self,
         query: str,
-        k: int = 4,
+        k: int = 3,
         exclude_dialog: str | None = None,
     ) -> list[dict[str, Any]]:
         """
@@ -355,7 +355,7 @@ class DynamicFewShotBucketIndex:
         self,
         query: str,
         bucket: int = 0,
-        k: int = 4,
+        k: int = 3,
         exclude_dialog: str | None = None,
     ) -> list[dict[str, Any]]:
         idx = self.get_bucket_index(bucket)
@@ -370,7 +370,7 @@ _cached_bucket_index: DynamicFewShotBucketIndex | None = None
 def get_dynamic_few_shots(
     query: str,
     bucket: int = 0,
-    k: int = 4,
+    k: int = 3,
     data_dir: Path | str = DEFAULT_DATA_DIR,
     split: str = DEFAULT_SPLIT,
     model_name: str = DEFAULT_EMBEDDING_MODEL,
@@ -461,7 +461,7 @@ def get_fitting_few_shot_examples(
     query_history: str = "keine Historie",
     bucket: int | None = None,
     max_input_tokens: int = 24000,
-    max_examples: int = 4,
+    max_examples: int = 3,
     candidate_k: int = 15,
     data_dir: Path | str = DEFAULT_DATA_DIR,
     split: str = DEFAULT_SPLIT,
@@ -539,7 +539,7 @@ if __name__ == "__main__":
     print(f"[INFO] Query Text: {test_query}\n")
 
     for b in range(6):
-        results = get_dynamic_few_shots(test_query, bucket=b, k=4)
+        results = get_dynamic_few_shots(test_query, bucket=b, k=3)
         print(f"\n--- Bucket {b} (Retrieved {len(results)} examples) ---")
         for rank, ex in enumerate(results, start=1):
             print(

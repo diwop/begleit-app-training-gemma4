@@ -354,7 +354,7 @@ def main() -> None:
                 query_history=history_in,
                 bucket=bucket,
                 max_input_tokens=MAX_INPUT_TOKENS,
-                max_examples=4,
+                max_examples=3,
                 exclude_dialog=dialog_name,
             )
             few_shot_user_prompt = build_dynamic_few_shot_user_prompt(
@@ -665,12 +665,6 @@ def main() -> None:
         fewshot3_assistant = (
             examples[2]["assistant"] if len(examples) > 2 else None
         )
-        fewshot4_original = (
-            examples[3]["user_input"] if len(examples) > 3 else None
-        )
-        fewshot4_assistant = (
-            examples[3]["assistant"] if len(examples) > 3 else None
-        )
 
         history_val = rec.get("history", "keine Historie")
         bucket_val = determine_bucket(rec)
@@ -694,8 +688,6 @@ def main() -> None:
             "fewshot2_assistant": fewshot2_assistant,
             "fewshot3_original": fewshot3_original,
             "fewshot3_assistant": fewshot3_assistant,
-            "fewshot4_original": fewshot4_original,
-            "fewshot4_assistant": fewshot4_assistant,
             "assistant": rec["assistant"],
             "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,
