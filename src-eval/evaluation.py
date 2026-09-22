@@ -650,6 +650,7 @@ def main() -> None:
         fewshot1_original = examples[0]["user_input"] if len(examples) > 0 else None
         fewshot1_assistant = examples[0]["assistant"] if len(examples) > 0 else None
         fewshot2_original = examples[1]["user_input"] if len(examples) > 1 else None
+        fewshot2_assistant = examples[1]["assistant"] if len(examples) > 1 else None
         status_thinking = classify_reasoning_trace(extract_output_text(thinking_outputs[idx])) if thinking_outputs else None
         status_few_shots = classify_reasoning_trace(extract_output_text(few_shot_outputs[idx])) if few_shot_outputs else None
         status_merged_8bit = classify_reasoning_trace(raw_merged_8bit) if merged_adapter_8bit_outputs is not None else None
