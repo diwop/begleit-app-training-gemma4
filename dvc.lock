@@ -14,26 +14,22 @@ stages:
       size: 207
     - path: prompts/system-prompt.md
       hash: md5
-      md5: e06731bfd3e04e40505d9c092be51b3d
-      size: 3587
+      md5: 57f79f5efdccdba8971e1e0bac33e9fd
+      size: 4649
     - path: src-train/prepare_data.py
       hash: md5
-      md5: 2629ab079dbd0861cdafb5372a517ce5
-      size: 8053
+      md5: e43868ca5ceffe2d2da4d4833f8f2fd6
+      size: 7757
       isexec: true
     outs:
     - path: data/dataset_eval.jsonl
       hash: md5
-      md5: ebbedfb53c671195550672ef64dc82e9
-      size: 1370378
+      md5: 6a072ff42582ea01ba994ae2f76bd33d
+      size: 1543782
     - path: data/dataset_train.jsonl
       hash: md5
-      md5: c7dec66fe21a009a569770541a47e149
-      size: 12456842
-    - path: data/dataset_train_sample.jsonl
-      hash: md5
-      md5: 994418c0f1bac9c20ed40c863a014d11
-      size: 270480
+      md5: 673edce215a9c99b9067aa6b3f1b2910
+      size: 14021982
   prepare_data_dialogs:
     cmd: python3 src-train/prepare_data_dialogs.py
     deps:
@@ -48,8 +44,8 @@ stages:
       size: 254
     - path: prompts/system-prompt_dialogs.md
       hash: md5
-      md5: b71f4ce2df1b609a1745f137c929e7b0
-      size: 5790
+      md5: b83fa2e48346d560e5e7ff2195754c36
+      size: 6568
     - path: src-train/prepare_data_dialogs.py
       hash: md5
       md5: 9faa4a75b97469f8bed9b12f1fd33886
@@ -58,12 +54,12 @@ stages:
     outs:
     - path: data/dataset_eval_dialogs.jsonl
       hash: md5
-      md5: fd5aa2d6acb7f979ab9908f162bf8674
-      size: 787426
+      md5: e1800cc8952a3b388545f35912a25465
+      size: 856060
     - path: data/dataset_train_dialogs.jsonl
       hash: md5
-      md5: 7acbd382be1e14e157f3980b7cf23c96
-      size: 3834669
+      md5: af5087b558809e211ea1ea749fe5c6b6
+      size: 4174491
   prepare_few_shots_dialogs:
     cmd: python3 src-eval/prepare_few_shots_dialogs.py
     deps:
