@@ -225,6 +225,7 @@ def main() -> None:
         context_length=MAX_SEQUENCE_LENGTH,
         mem_fraction_static=0.75,
         disable_cuda_graph=True,
+        disable_hybrid_swa_memory=True,
     )
     engine_ready_time = time.time() - engine_start
     print(f"[SUCCESS] SGLang engine ready in {engine_ready_time:.1f}s.")
