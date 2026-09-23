@@ -32,7 +32,7 @@ DEFAULT_JUDGE_MODEL = "nvidia/Llama-4-Scout-17B-16E-Instruct-FP8"
 JUDGE_MODEL_NAME = os.environ.get("JUDGE_MODEL_NAME", DEFAULT_JUDGE_MODEL)
 TENSOR_PARALLEL_SIZE = int(os.environ.get("TENSOR_PARALLEL_SIZE", "4"))
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
-MAX_SEQUENCE_LENGTH = int(os.environ.get("MAX_SEQUENCE_LENGTH", "16384"))
+MAX_SEQUENCE_LENGTH = int(os.environ.get("MAX_SEQUENCE_LENGTH", "8192"))
 
 EVAL_RESULTS_PATH = Path("data/results.jsonl")
 JUDGE_SYSTEM_PROMPT_PATH = Path("prompts/judge-system-prompt.md")
@@ -223,7 +223,8 @@ def main() -> None:
         tp_size=TENSOR_PARALLEL_SIZE,
         trust_remote_code=True,
         context_length=MAX_SEQUENCE_LENGTH,
-        mem_fraction_static=0.85,
+        mem_fraction_static=0.75,
+        disable_cuda_graph=True,
     )
     engine_ready_time = time.time() - engine_start
     print(f"[SUCCESS] SGLang engine ready in {engine_ready_time:.1f}s.")
