@@ -1,0 +1,82 @@
+{
+  "timestamp": "2026-09-22T17:32:52Z",
+  "total_samples": 79,
+  "total_evaluation_time_seconds": 2921.4,
+  "phase_elapsed_seconds": {
+    "step1_base_zero_shot": 70.85,
+    "step2_base_thinking": 585.21,
+    "step3_base_few_shots": 818.14,
+    "step4_merged_adapter_8bit": 1298.11
+  },
+  "model_speeds_tokens_per_second": {
+    "assistant_gemma4_speed": 593.58,
+    "assistant_gemma4_thinking_speed": 530.29,
+    "assistant_gemma4_dynamic_few_shots_speed": 343.86,
+    "assistant_gemma4_merged_adapter_8bit_speed": 417.42
+  },
+  "structural_reasoning_metrics": {
+    "step2_base_thinking": {
+      "total": 79,
+      "valid_count": 79,
+      "empty_count": 0,
+      "missing_count": 0,
+      "truncated_count": 0,
+      "valid_reasoning_rate": 100.0,
+      "empty_reasoning_rate": 0.0,
+      "missing_reasoning_rate": 0.0,
+      "truncated_reasoning_rate": 0.0
+    },
+    "step3_base_few_shots": {
+      "total": 79,
+      "valid_count": 79,
+      "empty_count": 0,
+      "missing_count": 0,
+      "truncated_count": 0,
+      "valid_reasoning_rate": 100.0,
+      "empty_reasoning_rate": 0.0,
+      "missing_reasoning_rate": 0.0,
+      "truncated_reasoning_rate": 0.0
+    },
+    "step4_merged_adapter_8bit": {
+      "total": 79,
+      "valid_count": 34,
+      "empty_count": 0,
+      "missing_count": 2,
+      "truncated_count": 43,
+      "valid_reasoning_rate": 43.0,
+      "empty_reasoning_rate": 0.0,
+      "missing_reasoning_rate": 2.5,
+      "truncated_reasoning_rate": 54.4
+    }
+  },
+  "average_metrics": {
+    "input_standardsprache": {
+      "fre": 44.2,
+      "wstf": 10.4
+    },
+    "ground_truth": {
+      "fre": 63.3,
+      "wstf": 6.1
+    },
+    "assistant_gemma4": {
+      "fre": 71.1,
+      "wstf": 5.3,
+      "speed_tokens_per_sec": 593.58
+    },
+    "assistant_gemma4_thinking": {
+      "fre": 73.1,
+      "wstf": 5.0,
+      "speed_tokens_per_sec": 530.29
+    },
+    "assistant_gemma4_dynamic_few_shots": {
+      "fre": 71.9,
+      "wstf": 5.2,
+      "speed_tokens_per_sec": 343.86
+    },
+    "assistant_gemma4_merged_adapter_8bit": {
+      "fre": 70.9,
+      "wstf": 5.3,
+      "speed_tokens_per_sec": 417.42
+    }
+  }
+}
