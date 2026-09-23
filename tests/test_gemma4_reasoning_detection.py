@@ -14,7 +14,7 @@ sys.path.insert(0, str(SRC_TRAIN_DIR))
 sys.path.insert(0, str(SRC_EVAL_DIR))
 
 from prepare_data import detect_reasoning_delimiters, format_input_output_segments
-from evaluation import classify_reasoning_trace, compute_structural_reasoning_metrics
+from evaluation import classify_reasoning_trace, compute_structural_reasoning_metrics, count_tokens
 
 
 class MockTokenizerWithGemma4Template:
@@ -231,6 +231,39 @@ def test_compute_structural_reasoning_metrics():
     assert empty_metrics["valid_reasoning_rate"] == 0.0
 
 
+def test_count_tokens():
+    """Verify that count_tokens properly handles edge cases and mock tokenizers."""
+    class DummyTokenizer:
+        def encode(self, text, add_special_tokens=False):
+            return text.split()
+
+    tok = DummyTokenizer()
+    assert count_tokens("Hallo Welt", tok) == 2
+    assert count_tokens("", tok) == 0
+    assert count_tokens("   ", tok) == 0
+    assert count_tokens(None, tok) == 0
+    assert count_tokens("Hallo", None) == 0
+
+
+def test_token_counting_logic():
+    """Verify reasoning vs answer token counting logic."""
+    class DummyTokenizer:
+        def encode(self, text, add_special_tokens=False):
+            return text.split()
+
+    tok = DummyTokenizer()
+    reasoning = "Schritt 1: Denken und analysieren"  # 5 tokens
+    answer = "Das ist die Antwort."                 # 4 tokens
+
+    reasoning_tokens = count_tokens(reasoning, tok)
+    answer_tokens = count_tokens(answer, tok)
+    total_tokens = reasoning_tokens + answer_tokens
+
+    assert reasoning_tokens == 5
+    assert answer_tokens == 4
+    assert total_tokens == 9
+
+
 if __name__ == "__main__":
     test_detect_reasoning_delimiters_from_gemma4_template()
     test_detect_reasoning_delimiters_fallback_when_none()
@@ -241,4 +274,6 @@ if __name__ == "__main__":
     test_classify_reasoning_trace_gemma4()
     test_classify_reasoning_trace_alternative_delimiters()
     test_compute_structural_reasoning_metrics()
+    test_count_tokens()
+    test_token_counting_logic()
     print("[SUCCESS] All Gemma 4 reasoning delimiter, input_output segment & structural reasoning metric tests passed!")
