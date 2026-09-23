@@ -23,6 +23,7 @@ Hier sind Beispiele für Übersetzungen von Standardsprache in Leichte Sprache:
 ```
 
 #### Ausgabe: Übersetzung in Leichte Sprache
+
 ```output
 %FEW_SHOT_OUTPUT_2%
 ```

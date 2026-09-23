@@ -1,0 +1,6 @@
+outs:
+- md5: 2ddc1a0180e055fbb579b66e1af4a0d2.dir
+  size: 223243
+  nfiles: 57
+  hash: md5
+  path: raw_dialogs

@@ -1,0 +1,92 @@
+base_model: google/gemma-4-26b-a4b-it
+model_type: AutoModelForCausalLM
+tokenizer_type: AutoTokenizer
+
+# Gemma 4 Architecture & Attention Optimization (Native PyTorch SDPA)
+attn_implementation: sdpa
+gemma4_hybrid_attn_impl: false
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  # Under DeepSpeed ZeRO-3, parameter sharding frees memory after forward passes, leaving Size([0]) tensors.
+  # use_reentrant: true prevents PyTorch's check_recomputed_tensors_match from throwing CheckpointError in backward.
+  # train_patched.py enforces this at runtime after Axolotl's schema validator.
+  use_reentrant: true
+
+# DeepSpeed Memory & Sharding Optimizations
+deepspeed: src-train/deepspeed_zero3.json
+deepspeed_cpu_checkpointing: true
+deepspeed_param_persistence_threshold: 0
+deepspeed_offload_param: true
+deepspeed_offload_optimizer: true
+
+# Liger Kernel Acceleration
+plugins:
+  - axolotl.integrations.liger.LigerPlugin
+
+liger_rope: true
+liger_rms_norm: true
+liger_glu_activation: true
+liger_layer_norm: true
+liger_fused_linear_cross_entropy: true
+
+# Set to standard lora since the base model is unquantized bfloat16
+adapter: lora
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+
+# Disable experimental LoRA Triton kernel rewrites
+lora_qkv_kernel: false
+lora_o_kernel: false
+lora_mlp_kernel: false
+lora_embedding_kernel: false
+
+# Fully qualified: targets language model layers only, avoiding vision tower (Gemma4ClippableLinear) and routers
+lora_target_modules: 'model\.language_model\.layers\.[\d]+\.(_checkpoint_wrapped_module\.)?(mlp|self_attn)\.(up|down|gate|q|k|v|o)_proj'
+
+# Precision architecture tailored for modern compute architectures (L40S / Hopper / Ada)
+bf16: true
+fp16: false
+tf32: true
+
+unsloth: false
+load_in_8bit: false # Disabled: Fits natively sharded under ZeRO-3
+load_in_4bit: false
+qlora_sharded_model_loading: false
+
+# Turn boundaries. Gemma 4 ends a turn with '<turn|>' (id 106)
+special_tokens:
+  eos_token: "<eos>"
+eot_tokens:
+  - "<turn|>"
+
+# Dataset Configuration
+datasets:
+  - path: data/dataset_train_dialogs.jsonl
+    type: chat_template
+    chat_template: tokenizer_default
+    field_messages: messages
+    message_property_mappings:
+      role: role
+      content: content
+
+# Sequence and Batch Dimensions
+sequence_len: 8192
+sample_packing: false
+pad_to_sequence_len: false
+
+micro_batch_size: 1
+gradient_accumulation_steps: 2
+
+# Training Schedule
+num_epochs: 3
+learning_rate: 0.0002
+lr_scheduler: cosine
+warmup_ratio: 0.05
+weight_decay: 0.01
+
+# Output and Logging
+logging_steps: 1
+save_safetensors: true
+save_strategy: "epoch"
+output_dir: ./local/adapters/gemma-4-26b-a4b-it-lora_dialogs

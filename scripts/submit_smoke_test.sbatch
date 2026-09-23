@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=axolotl-smoke-test
 #SBATCH --partition=small_gpu8
-#SBATCH --gpus=2
+#SBATCH --nodes=1-1
+#SBATCH --gpus-per-node=2
 #SBATCH --time=00:02:00
 #SBATCH --output=logs/smoke_test_%j.log
 #SBATCH --error=logs/smoke_test_%j-err.log

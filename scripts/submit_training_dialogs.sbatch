@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=gemma4-eval
+#SBATCH --job-name=gemma4-train-dialogs-fp8
 #SBATCH --partition=small_gpu8
 #SBATCH --nodes=1-1
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120G
-#SBATCH --time=00:40:00
-#SBATCH --output=logs/eval_%j.log
-#SBATCH --error=logs/eval_%j-err.log
+#SBATCH --time=02:30:00
+#SBATCH --output=logs/train_dialogs_%j.log
+#SBATCH --error=logs/train_dialogs_%j-err.log
 
 # Navigate to submission directory where sbatch was executed
 if [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
@@ -24,5 +24,5 @@ echo "Partition    : ${SLURM_JOB_PARTITION:-N/A}"
 echo "Submit Dir   : ${SLURM_SUBMIT_DIR:-$PWD}"
 echo "========================="
 
-# Execute SGLang evaluation helper script
-bash scripts/run_evaluation.sh
+# Execute combined training, merge, and FP8 quantization pipeline for dialogs
+bash scripts/run_training_dialogs.sh

@@ -4,6 +4,7 @@ local/
 images/
 *.sif
 logs/
+.worktrees/
 .dvc/config.local
 .dvc/tmp
 
@@ -42,6 +43,7 @@ venv.bak/
 # Data formats used in training
 *.jsonl
 !data/sample_dataset.jsonl
+*-metadata.json
 *.csv
 *.tsv
 *.parquet
