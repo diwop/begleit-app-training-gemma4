@@ -64,7 +64,7 @@ except ImportError:
 
 # Context length and token budgets for SGLang engine
 MAX_SEQUENCE_LENGTH = 32768
-MAX_NEW_TOKENS = 8192
+MAX_NEW_TOKENS = int(os.environ.get("MAX_NEW_TOKENS", "16384"))
 MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
 # Default to 0 for full dataset evaluation. Set MAX_EVAL_SAMPLES=8 for smoke test.
@@ -232,6 +232,16 @@ def calculate_speed(outputs, elapsed_seconds: float, tokenizer) -> float:
         if text:
             total_tokens += len(tokenizer.encode(text, add_special_tokens=False))
     return round(total_tokens / elapsed_seconds, 2)
+
+
+def count_tokens(text: str | None, tokenizer) -> int:
+    """Count tokens in string using tokenizer. Returns 0 if text is empty or tokenizer is None."""
+    if not text or not str(text).strip() or tokenizer is None:
+        return 0
+    try:
+        return len(tokenizer.encode(str(text), add_special_tokens=False))
+    except Exception:
+        return 0
 
 
 def get_raw_metrics(text: str | None) -> dict[str, float]:
@@ -459,12 +469,12 @@ def main() -> None:
         "temperature": 1.0,
         "top_p": 0.95,
         "top_k": 64,
-        "max_new_tokens": 8192,
+        "max_new_tokens": MAX_NEW_TOKENS,
         "skip_special_tokens": False,
     }
     sampling_params_no_thinking = {
         "temperature": 0.0,
-        "max_new_tokens": 8192,
+        "max_new_tokens": MAX_NEW_TOKENS,
         "skip_special_tokens": False,
     }
 
@@ -579,6 +589,30 @@ def main() -> None:
         "gemma4_dynamic_few_shots": [],
         "gemma4_merged_adapter_8bit": [],
     }
+    token_stats = {
+        "input": [],
+        "ground_truth": [],
+        "gemma4": {
+            "answer": [],
+            "reasoning": [],
+            "total": [],
+        },
+        "gemma4_thinking": {
+            "answer": [],
+            "reasoning": [],
+            "total": [],
+        },
+        "gemma4_dynamic_few_shots": {
+            "answer": [],
+            "reasoning": [],
+            "total": [],
+        },
+        "gemma4_merged_adapter_8bit": {
+            "answer": [],
+            "reasoning": [],
+            "total": [],
+        },
+    }
 
     for idx, rec in enumerate(records):
         out_no_thinking = None
@@ -647,6 +681,50 @@ def main() -> None:
             if gemma4_merged_adapter_8bit_metrics is not None:
                 wstf_scores["gemma4_merged_adapter_8bit"].append(gemma4_merged_adapter_8bit_metrics["wstf"])
 
+        # Token counts for inputs and outputs (reasoning vs. answer)
+        user_input_tokens = count_tokens(raw_user_input, tokenizer)
+        token_stats["input"].append(user_input_tokens)
+
+        assistant_gt_tokens = count_tokens(rec["assistant"], tokenizer) if rec["assistant"] is not None else None
+        if assistant_gt_tokens is not None:
+            token_stats["ground_truth"].append(assistant_gt_tokens)
+
+        # Step 1: Base Zero-Shot tokens
+        gemma4_ans_tokens = count_tokens(out_no_thinking, tokenizer) if out_no_thinking is not None else None
+        gemma4_reason_tokens = 0 if out_no_thinking is not None else None
+        gemma4_total_tokens = gemma4_ans_tokens if gemma4_ans_tokens is not None else None
+        if gemma4_ans_tokens is not None:
+            token_stats["gemma4"]["answer"].append(gemma4_ans_tokens)
+            token_stats["gemma4"]["reasoning"].append(0)
+            token_stats["gemma4"]["total"].append(gemma4_ans_tokens)
+
+        # Step 2: Base Thinking tokens
+        gemma4_think_reason_tokens = count_tokens(reasoning_trace, tokenizer) if reasoning_trace is not None else 0
+        gemma4_think_ans_tokens = count_tokens(out_thinking, tokenizer) if out_thinking is not None else 0
+        gemma4_think_total_tokens = (gemma4_think_reason_tokens + gemma4_think_ans_tokens) if thinking_outputs is not None else None
+        if thinking_outputs is not None:
+            token_stats["gemma4_thinking"]["answer"].append(gemma4_think_ans_tokens)
+            token_stats["gemma4_thinking"]["reasoning"].append(gemma4_think_reason_tokens)
+            token_stats["gemma4_thinking"]["total"].append(gemma4_think_total_tokens)
+
+        # Step 3: Base Dynamic Few-Shot Thinking tokens
+        gemma4_few_reason_tokens = count_tokens(few_shots_reasoning, tokenizer) if few_shots_reasoning is not None else 0
+        gemma4_few_ans_tokens = count_tokens(out_few_shots, tokenizer) if out_few_shots is not None else 0
+        gemma4_few_total_tokens = (gemma4_few_reason_tokens + gemma4_few_ans_tokens) if few_shot_outputs is not None else None
+        if few_shot_outputs is not None:
+            token_stats["gemma4_dynamic_few_shots"]["answer"].append(gemma4_few_ans_tokens)
+            token_stats["gemma4_dynamic_few_shots"]["reasoning"].append(gemma4_few_reason_tokens)
+            token_stats["gemma4_dynamic_few_shots"]["total"].append(gemma4_few_total_tokens)
+
+        # Step 4: Fine-Tuned Merged 8-bit Thinking tokens
+        gemma4_merged_reason_tokens = count_tokens(merged_adapter_8bit_reasoning, tokenizer) if merged_adapter_8bit_reasoning is not None else 0
+        gemma4_merged_ans_tokens = count_tokens(out_merged_adapter_8bit, tokenizer) if out_merged_adapter_8bit is not None else 0
+        gemma4_merged_total_tokens = (gemma4_merged_reason_tokens + gemma4_merged_ans_tokens) if merged_adapter_8bit_outputs is not None else None
+        if merged_adapter_8bit_outputs is not None:
+            token_stats["gemma4_merged_adapter_8bit"]["answer"].append(gemma4_merged_ans_tokens)
+            token_stats["gemma4_merged_adapter_8bit"]["reasoning"].append(gemma4_merged_reason_tokens)
+            token_stats["gemma4_merged_adapter_8bit"]["total"].append(gemma4_merged_total_tokens)
+
         examples = few_shot_examples_per_sample[idx]
         fewshot1_original = examples[0]["user_input"] if len(examples) > 0 else None
         fewshot1_assistant = examples[0]["assistant"] if len(examples) > 0 else None
@@ -660,6 +738,7 @@ def main() -> None:
             "id": rec["id"],
             "system": rec["system"],
             "user_input": raw_user_input,
+            "user_input_tokens": user_input_tokens,
             "user_input_metrics": user_metrics,
             "user": rec["user"],
             "user_dynamic_few_shots": few_shot_conversations[idx][1]["content"],
@@ -668,20 +747,33 @@ def main() -> None:
             "fewshot2_original": fewshot2_original,
             "fewshot2_assistant": fewshot2_assistant,
             "assistant": rec["assistant"],
+            "assistant_tokens": assistant_gt_tokens,
             "assistant_metrics": assistant_metrics,
             "assistant_gemma4": out_no_thinking,
+            "assistant_gemma4_answer_tokens": gemma4_ans_tokens,
+            "assistant_gemma4_reasoning_tokens": gemma4_reason_tokens,
+            "assistant_gemma4_total_tokens": gemma4_total_tokens,
             "assistant_gemma4_metrics": gemma4_metrics,
             "assistant_gemma4_thinking_reasoning": reasoning_trace,
+            "assistant_gemma4_thinking_reasoning_tokens": gemma4_think_reason_tokens if thinking_outputs is not None else None,
             "assistant_gemma4_thinking_reasoning_status": status_thinking,
             "assistant_gemma4_thinking": out_thinking,
+            "assistant_gemma4_thinking_answer_tokens": gemma4_think_ans_tokens if thinking_outputs is not None else None,
+            "assistant_gemma4_thinking_total_tokens": gemma4_think_total_tokens,
             "assistant_gemma4_thinking_metrics": gemma4_thinking_metrics,
             "assistant_gemma4_dynamic_few_shots_reasoning": few_shots_reasoning,
+            "assistant_gemma4_dynamic_few_shots_reasoning_tokens": gemma4_few_reason_tokens if few_shot_outputs is not None else None,
             "assistant_gemma4_dynamic_few_shots_reasoning_status": status_few_shots,
             "assistant_gemma4_dynamic_few_shots": out_few_shots,
+            "assistant_gemma4_dynamic_few_shots_answer_tokens": gemma4_few_ans_tokens if few_shot_outputs is not None else None,
+            "assistant_gemma4_dynamic_few_shots_total_tokens": gemma4_few_total_tokens,
             "assistant_gemma4_dynamic_few_shots_metrics": gemma4_few_shots_metrics,
             "assistant_gemma4_merged_adapter_8bit_reasoning": merged_adapter_8bit_reasoning,
+            "assistant_gemma4_merged_adapter_8bit_reasoning_tokens": gemma4_merged_reason_tokens if merged_adapter_8bit_outputs is not None else None,
             "assistant_gemma4_merged_adapter_8bit_reasoning_status": status_merged_8bit,
             "assistant_gemma4_merged_adapter_8bit": out_merged_adapter_8bit,
+            "assistant_gemma4_merged_adapter_8bit_answer_tokens": gemma4_merged_ans_tokens if merged_adapter_8bit_outputs is not None else None,
+            "assistant_gemma4_merged_adapter_8bit_total_tokens": gemma4_merged_total_tokens,
             "assistant_gemma4_merged_adapter_8bit_metrics": gemma4_merged_adapter_8bit_metrics,
         }
         results.append(result_entry)
@@ -739,6 +831,54 @@ def main() -> None:
     if struct_metrics_merged_8bit["total"] > 0:
         print(f"  * Step 4 (Merged 8-bit + Think) : VR = {struct_metrics_merged_8bit['valid_reasoning_rate']}% | ER = {struct_metrics_merged_8bit['empty_reasoning_rate']}% | MR = {struct_metrics_merged_8bit['missing_reasoning_rate']}% | TR = {struct_metrics_merged_8bit['truncated_reasoning_rate']}%")
 
+    def compute_avg_token_stats(stats_dict):
+        if not stats_dict["total"]:
+            return {
+                "total_reasoning_tokens": 0,
+                "total_answer_tokens": 0,
+                "total_tokens": 0,
+                "avg_reasoning_tokens": 0.0,
+                "avg_answer_tokens": 0.0,
+                "avg_total_tokens": 0.0,
+            }
+        n = len(stats_dict["total"])
+        tot_r = sum(stats_dict["reasoning"])
+        tot_a = sum(stats_dict["answer"])
+        tot_t = sum(stats_dict["total"])
+        return {
+            "total_reasoning_tokens": tot_r,
+            "total_answer_tokens": tot_a,
+            "total_tokens": tot_t,
+            "avg_reasoning_tokens": round(tot_r / n, 1),
+            "avg_answer_tokens": round(tot_a / n, 1),
+            "avg_total_tokens": round(tot_t / n, 1),
+        }
+
+    token_summary = {
+        "assistant_gemma4": compute_avg_token_stats(token_stats["gemma4"]),
+        "assistant_gemma4_thinking": compute_avg_token_stats(token_stats["gemma4_thinking"]),
+        "assistant_gemma4_dynamic_few_shots": compute_avg_token_stats(token_stats["gemma4_dynamic_few_shots"]),
+        "assistant_gemma4_merged_adapter_8bit": compute_avg_token_stats(token_stats["gemma4_merged_adapter_8bit"]),
+    }
+    avg_in_tokens = round(sum(token_stats["input"]) / len(token_stats["input"]), 1) if token_stats["input"] else 0.0
+    avg_gt_tokens = round(sum(token_stats["ground_truth"]) / len(token_stats["ground_truth"]), 1) if token_stats["ground_truth"] else 0.0
+
+    print("\n  --- Output Token Statistics (Reasoning vs. Answer) ---")
+    print(f"  * Input Standardsprache         : Avg Tokens = {avg_in_tokens}")
+    print(f"  * Ground Truth (Target)         : Avg Tokens = {avg_gt_tokens}")
+    if token_stats["gemma4"]["total"]:
+        st = token_summary["assistant_gemma4"]
+        print(f"  * Step 1 (Base Zero-Shot)       : Avg Answer Tokens = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
+    if token_stats["gemma4_thinking"]["total"]:
+        st = token_summary["assistant_gemma4_thinking"]
+        print(f"  * Step 2 (Base + Think)         : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
+    if token_stats["gemma4_dynamic_few_shots"]["total"]:
+        st = token_summary["assistant_gemma4_dynamic_few_shots"]
+        print(f"  * Step 3 (Few-Shot + Think)     : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
+    if token_stats["gemma4_merged_adapter_8bit"]["total"]:
+        st = token_summary["assistant_gemma4_merged_adapter_8bit"]
+        print(f"  * Step 4 (Merged 8-bit + Think) : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
+
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
 
@@ -769,34 +909,58 @@ def main() -> None:
             "step3_base_few_shots": struct_metrics_few_shots,
             "step4_merged_adapter_8bit": struct_metrics_merged_8bit,
         },
+        "token_statistics": {
+            "input_standardsprache": {
+                "total_tokens": sum(token_stats["input"]),
+                "avg_tokens": avg_in_tokens,
+            },
+            "ground_truth": {
+                "total_tokens": sum(token_stats["ground_truth"]),
+                "avg_tokens": avg_gt_tokens,
+            },
+            **token_summary,
+        },
         "average_metrics": {
             "input_standardsprache": {
                 "fre": round(avg_in_fre, 1) if num_eval_ds > 0 else None,
                 "wstf": round(avg_in_wstf, 1) if num_eval_ds > 0 else None,
+                "avg_tokens": avg_in_tokens,
             },
             "ground_truth": {
                 "fre": round(avg_gt_fre, 1) if num_eval_ds > 0 else None,
                 "wstf": round(avg_gt_wstf, 1) if num_eval_ds > 0 else None,
+                "avg_tokens": avg_gt_tokens,
             },
             "assistant_gemma4": {
                 "fre": round(avg_g4_fre, 1) if fre_scores["gemma4"] else None,
                 "wstf": round(avg_g4_wstf, 1) if wstf_scores["gemma4"] else None,
                 "speed_tokens_per_sec": assistant_gemma4_speed,
+                "avg_answer_tokens": token_summary["assistant_gemma4"]["avg_answer_tokens"] if token_stats["gemma4"]["total"] else None,
+                "avg_total_tokens": token_summary["assistant_gemma4"]["avg_total_tokens"] if token_stats["gemma4"]["total"] else None,
             },
             "assistant_gemma4_thinking": {
                 "fre": round(avg_g4_think_fre, 1) if fre_scores["gemma4_thinking"] else None,
                 "wstf": round(avg_g4_think_wstf, 1) if wstf_scores["gemma4_thinking"] else None,
                 "speed_tokens_per_sec": assistant_gemma4_thinking_speed,
+                "avg_reasoning_tokens": token_summary["assistant_gemma4_thinking"]["avg_reasoning_tokens"] if token_stats["gemma4_thinking"]["total"] else None,
+                "avg_answer_tokens": token_summary["assistant_gemma4_thinking"]["avg_answer_tokens"] if token_stats["gemma4_thinking"]["total"] else None,
+                "avg_total_tokens": token_summary["assistant_gemma4_thinking"]["avg_total_tokens"] if token_stats["gemma4_thinking"]["total"] else None,
             },
             "assistant_gemma4_dynamic_few_shots": {
                 "fre": round(avg_g4_few_fre, 1) if fre_scores["gemma4_dynamic_few_shots"] else None,
                 "wstf": round(avg_g4_few_wstf, 1) if wstf_scores["gemma4_dynamic_few_shots"] else None,
                 "speed_tokens_per_sec": assistant_gemma4_dynamic_few_shots_speed,
+                "avg_reasoning_tokens": token_summary["assistant_gemma4_dynamic_few_shots"]["avg_reasoning_tokens"] if token_stats["gemma4_dynamic_few_shots"]["total"] else None,
+                "avg_answer_tokens": token_summary["assistant_gemma4_dynamic_few_shots"]["avg_answer_tokens"] if token_stats["gemma4_dynamic_few_shots"]["total"] else None,
+                "avg_total_tokens": token_summary["assistant_gemma4_dynamic_few_shots"]["avg_total_tokens"] if token_stats["gemma4_dynamic_few_shots"]["total"] else None,
             },
             "assistant_gemma4_merged_adapter_8bit": {
                 "fre": round(avg_g4_merged_8bit_fre, 1) if fre_scores["gemma4_merged_adapter_8bit"] else None,
                 "wstf": round(avg_g4_merged_8bit_wstf, 1) if wstf_scores["gemma4_merged_adapter_8bit"] else None,
                 "speed_tokens_per_sec": assistant_gemma4_merged_adapter_8bit_speed,
+                "avg_reasoning_tokens": token_summary["assistant_gemma4_merged_adapter_8bit"]["avg_reasoning_tokens"] if token_stats["gemma4_merged_adapter_8bit"]["total"] else None,
+                "avg_answer_tokens": token_summary["assistant_gemma4_merged_adapter_8bit"]["avg_answer_tokens"] if token_stats["gemma4_merged_adapter_8bit"]["total"] else None,
+                "avg_total_tokens": token_summary["assistant_gemma4_merged_adapter_8bit"]["avg_total_tokens"] if token_stats["gemma4_merged_adapter_8bit"]["total"] else None,
             },
         },
     }
