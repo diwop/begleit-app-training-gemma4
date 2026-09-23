@@ -195,6 +195,18 @@ def main() -> None:
     print(f"\n[INFO] Loading tokenizer from: {model_path}")
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
+    if not getattr(tokenizer, "chat_template", None):
+        print("[INFO] Setting canonical Llama-4 chat template on tokenizer.")
+        tokenizer.chat_template = (
+            "{{- bos_token }}"
+            "{%- for message in messages %}"
+            "{{- '<|header_start|>' + message['role'] + '<|header_end|>\\n\\n' + message['content'] | trim + '<|eot|>' }}"
+            "{%- endfor %}"
+            "{%- if add_generation_prompt %}"
+            "{{- '<|header_start|>assistant<|header_end|>\\n\\n' }}"
+            "{%- endif %}"
+        )
+
     formatted_prompts = [
         tokenizer.apply_chat_template(
             req["conversation"],
@@ -220,6 +232,7 @@ def main() -> None:
     sampling_params = {
         "temperature": 0.0,
         "max_new_tokens": 2048,
+        "stop": ["<|eot|>", "<|end_of_text|>"],
         "skip_special_tokens": True,
     }
 

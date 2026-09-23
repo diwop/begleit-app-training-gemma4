@@ -17,5 +17,5 @@ echo "==================== [5. ACTIVE SMALL_GPU8 JOBS] ===================="
 squeue -p small_gpu8 -t RUNNING -o '%.10i %.10u %.2t %.10M %.10l %.6D %R'
 
 echo "==================== [6. PENDING PRIORITY QUEUE] ===================="
-squeue -p small_gpu8 -t PENDING -o '%i %u %l %b %R' | grep '(Priority)'
+squeue -p small_gpu8 -t PENDING -o '%i %u %l %b %R' | grep '(Priority)' || echo "No pending jobs with (Priority)"
 
