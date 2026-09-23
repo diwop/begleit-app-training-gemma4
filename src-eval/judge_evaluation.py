@@ -32,7 +32,7 @@ DEFAULT_JUDGE_MODEL = "nvidia/Llama-4-Scout-17B-16E-Instruct-FP8"
 JUDGE_MODEL_NAME = os.environ.get("JUDGE_MODEL_NAME", DEFAULT_JUDGE_MODEL)
 TENSOR_PARALLEL_SIZE = int(os.environ.get("TENSOR_PARALLEL_SIZE", "4"))
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
-MAX_SEQUENCE_LENGTH = int(os.environ.get("MAX_SEQUENCE_LENGTH", "8192"))
+MAX_SEQUENCE_LENGTH = int(os.environ.get("MAX_SEQUENCE_LENGTH", "16384"))
 
 EVAL_RESULTS_PATH = Path("data/results.jsonl")
 JUDGE_SYSTEM_PROMPT_PATH = Path("prompts/judge-system-prompt.md")
@@ -232,7 +232,7 @@ def main() -> None:
     # Execute Batch Generation
     sampling_params = {
         "temperature": 0.0,
-        "max_new_tokens": 2048,
+        "max_new_tokens": 1536,
         "stop": ["<|eot|>", "<|end_of_text|>"],
         "skip_special_tokens": True,
     }
