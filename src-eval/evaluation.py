@@ -64,14 +64,16 @@ except ImportError:
 
 # Context length and token budgets for SGLang engine
 MAX_SEQUENCE_LENGTH = 32768
-MAX_NEW_TOKENS = int(os.environ.get("MAX_NEW_TOKENS", "16384"))
+MAX_NEW_TOKENS = int(os.environ.get("MAX_NEW_TOKENS", "24576"))
 MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 
 # Default to 0 for full dataset evaluation. Set MAX_EVAL_SAMPLES=8 for smoke test.
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
 
 BASE_MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
-MERGED_MODEL_PATH = Path(os.environ.get("MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8"))
+UNMASKED_MODEL_PATH = Path(os.environ.get("UNMASKED_MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8-unmasked"))
+MASKED_MODEL_PATH = Path(os.environ.get("MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8"))
+MERGED_MODEL_PATH = MASKED_MODEL_PATH  # Alias for backward compatibility
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 TRAIN_DATA_PATH = Path("data/dataset_train.jsonl")
 RESULTS_OUTPUT_PATH = Path(os.environ.get("EVAL_RESULTS_OUTPUT", "data/results.jsonl"))
@@ -513,12 +515,12 @@ def main() -> None:
 
     # 3. Base model with dynamic few shots and thinking
     print("=" * 60)
-    print(f"[STEP 3/4] Running Base Model WITH Dynamic Few-Shots & thinking for {len(records)} samples...")
+    print(f"[STEP 3/5] Running Base Model WITH Dynamic Few-Shots & thinking for {len(records)} samples...")
     print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     step3_start = time.time()
     few_shot_outputs = engine.generate(prompts_few_shots, sampling_params_thinking)
     step3_elapsed = time.time() - step3_start
-    print(f"[SUCCESS] Step 3/4 (Few-Shots + Thinking) completed in {step3_elapsed:.1f}s ({step3_elapsed/len(records):.2f}s/sample)\n")
+    print(f"[SUCCESS] Step 3/5 (Few-Shots + Thinking) completed in {step3_elapsed:.1f}s ({step3_elapsed/len(records):.2f}s/sample)\n")
 
     engine.shutdown()
     del engine
@@ -528,15 +530,15 @@ def main() -> None:
         gc.collect()
 
     # =========================================================================
-    # STEP 4: Fine-Tuned Merged 8-bit Model Evaluation
+    # STEP 4: Fine-Tuned Unmasked Baseline Model Evaluation
     # =========================================================================
-    merged_adapter_8bit_outputs = None
+    unmasked_outputs = None
     step4_elapsed = None
-    if MERGED_MODEL_PATH.exists():
+    if UNMASKED_MODEL_PATH.exists():
         print("=" * 60)
-        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Merged 8-bit Model ({MERGED_MODEL_PATH})...")
-        merged_engine = sgl.Engine(
-            model_path=str(MERGED_MODEL_PATH),
+        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Unmasked Model ({UNMASKED_MODEL_PATH})...")
+        unmasked_engine = sgl.Engine(
+            model_path=str(UNMASKED_MODEL_PATH),
             tp_size=tp_size,
             trust_remote_code=True,
             mem_fraction_static=0.85,
@@ -546,24 +548,62 @@ def main() -> None:
         )
 
         print("=" * 60)
-        print(f"[STEP 4/4] Running Fine-Tuned Merged 8-bit Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
+        print(f"[STEP 4/5] Running Fine-Tuned Unmasked Baseline Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
         print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         step4_start = time.time()
 
-        merged_adapter_8bit_outputs = merged_engine.generate(prompts_thinking, sampling_params_thinking)
+        unmasked_outputs = unmasked_engine.generate(prompts_thinking, sampling_params_thinking)
 
         step4_elapsed = time.time() - step4_start
-        print(f"[SUCCESS] Step 4/4 (Merged 8-bit + Think) completed in {step4_elapsed:.1f}s ({step4_elapsed/len(records):.2f}s/sample)\n")
+        print(f"[SUCCESS] Step 4/5 (Unmasked Baseline + Think) completed in {step4_elapsed:.1f}s ({step4_elapsed/len(records):.2f}s/sample)\n")
 
-        merged_engine.shutdown()
-        del merged_engine
+        unmasked_engine.shutdown()
+        del unmasked_engine
         time.sleep(3)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             gc.collect()
     else:
         print("=" * 60)
-        print(f"[INFO] [STEP 4/4] Fine-tuned merged model not found at '{MERGED_MODEL_PATH}'. Skipping Pass 4.\n")
+        print(f"[INFO] [STEP 4/5] Fine-tuned unmasked baseline model not found at '{UNMASKED_MODEL_PATH}'. Skipping Step 4.\n")
+
+    # =========================================================================
+    # STEP 5: Fine-Tuned Masked Empty-Trace Model Evaluation (arXiv:2605.21127v1)
+    # =========================================================================
+    masked_outputs = None
+    step5_elapsed = None
+    if MASKED_MODEL_PATH.exists():
+        print("=" * 60)
+        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Masked Model ({MASKED_MODEL_PATH})...")
+        masked_engine = sgl.Engine(
+            model_path=str(MASKED_MODEL_PATH),
+            tp_size=tp_size,
+            trust_remote_code=True,
+            mem_fraction_static=0.85,
+            context_length=MAX_SEQUENCE_LENGTH,
+            watchdog_timeout=86400,
+            dist_timeout=7200,
+        )
+
+        print("=" * 60)
+        print(f"[STEP 5/5] Running Fine-Tuned Masked Empty-Trace Model WITH thinking (enable_thinking=True, T=1.0, top_p=0.95) for {len(records)} samples...")
+        print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        step5_start = time.time()
+
+        masked_outputs = masked_engine.generate(prompts_thinking, sampling_params_thinking)
+
+        step5_elapsed = time.time() - step5_start
+        print(f"[SUCCESS] Step 5/5 (Masked Empty-Trace + Think) completed in {step5_elapsed:.1f}s ({step5_elapsed/len(records):.2f}s/sample)\n")
+
+        masked_engine.shutdown()
+        del masked_engine
+        time.sleep(3)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            gc.collect()
+    else:
+        print("=" * 60)
+        print(f"[INFO] [STEP 5/5] Fine-tuned masked model not found at '{MASKED_MODEL_PATH}'. Skipping Step 5.\n")
 
     # =========================================================================
     # Assemble Results & Calculate Readability Metrics
@@ -580,6 +620,7 @@ def main() -> None:
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
         "gemma4_merged_adapter_8bit": [],
+        "gemma4_merged_adapter_8bit_masked": [],
     }
     wstf_scores = {
         "input": [],
@@ -588,6 +629,7 @@ def main() -> None:
         "gemma4_thinking": [],
         "gemma4_dynamic_few_shots": [],
         "gemma4_merged_adapter_8bit": [],
+        "gemma4_merged_adapter_8bit_masked": [],
     }
     token_stats = {
         "input": [],
@@ -608,6 +650,11 @@ def main() -> None:
             "total": [],
         },
         "gemma4_merged_adapter_8bit": {
+            "answer": [],
+            "reasoning": [],
+            "total": [],
+        },
+        "gemma4_merged_adapter_8bit_masked": {
             "answer": [],
             "reasoning": [],
             "total": [],
@@ -649,14 +696,23 @@ def main() -> None:
         user_metrics = get_raw_metrics(raw_user_input)
         assistant_metrics = get_raw_metrics(rec["assistant"]) if rec["assistant"] is not None else None
 
+        # Step 4: Fine-Tuned Unmasked Baseline Model outputs
         out_merged_adapter_8bit = None
         merged_adapter_8bit_reasoning = None
         gemma4_merged_adapter_8bit_metrics = None
-
-        if merged_adapter_8bit_outputs is not None:
-            raw_merged_8bit = extract_output_text(merged_adapter_8bit_outputs[idx])
-            merged_adapter_8bit_reasoning, out_merged_adapter_8bit = extract_gemma4_reasoning(raw_merged_8bit)
+        if unmasked_outputs is not None:
+            raw_unmasked = extract_output_text(unmasked_outputs[idx])
+            merged_adapter_8bit_reasoning, out_merged_adapter_8bit = extract_gemma4_reasoning(raw_unmasked)
             gemma4_merged_adapter_8bit_metrics = get_raw_metrics(out_merged_adapter_8bit)
+
+        # Step 5: Fine-Tuned Masked Empty-Trace Model outputs
+        out_merged_adapter_8bit_masked = None
+        merged_adapter_8bit_masked_reasoning = None
+        gemma4_merged_adapter_8bit_masked_metrics = None
+        if masked_outputs is not None:
+            raw_masked = extract_output_text(masked_outputs[idx])
+            merged_adapter_8bit_masked_reasoning, out_merged_adapter_8bit_masked = extract_gemma4_reasoning(raw_masked)
+            gemma4_merged_adapter_8bit_masked_metrics = get_raw_metrics(out_merged_adapter_8bit_masked)
 
         if assistant_metrics is not None:
             fre_scores["input"].append(user_metrics["fre"])
@@ -669,6 +725,8 @@ def main() -> None:
                 fre_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["fre"])
             if gemma4_merged_adapter_8bit_metrics is not None:
                 fre_scores["gemma4_merged_adapter_8bit"].append(gemma4_merged_adapter_8bit_metrics["fre"])
+            if gemma4_merged_adapter_8bit_masked_metrics is not None:
+                fre_scores["gemma4_merged_adapter_8bit_masked"].append(gemma4_merged_adapter_8bit_masked_metrics["fre"])
 
             wstf_scores["input"].append(user_metrics["wstf"])
             wstf_scores["ground_truth"].append(assistant_metrics["wstf"])
@@ -680,6 +738,8 @@ def main() -> None:
                 wstf_scores["gemma4_dynamic_few_shots"].append(gemma4_few_shots_metrics["wstf"])
             if gemma4_merged_adapter_8bit_metrics is not None:
                 wstf_scores["gemma4_merged_adapter_8bit"].append(gemma4_merged_adapter_8bit_metrics["wstf"])
+            if gemma4_merged_adapter_8bit_masked_metrics is not None:
+                wstf_scores["gemma4_merged_adapter_8bit_masked"].append(gemma4_merged_adapter_8bit_masked_metrics["wstf"])
 
         # Token counts for inputs and outputs (reasoning vs. answer)
         user_input_tokens = count_tokens(raw_user_input, tokenizer)
@@ -716,14 +776,23 @@ def main() -> None:
             token_stats["gemma4_dynamic_few_shots"]["reasoning"].append(gemma4_few_reason_tokens)
             token_stats["gemma4_dynamic_few_shots"]["total"].append(gemma4_few_total_tokens)
 
-        # Step 4: Fine-Tuned Merged 8-bit Thinking tokens
-        gemma4_merged_reason_tokens = count_tokens(merged_adapter_8bit_reasoning, tokenizer) if merged_adapter_8bit_reasoning is not None else 0
-        gemma4_merged_ans_tokens = count_tokens(out_merged_adapter_8bit, tokenizer) if out_merged_adapter_8bit is not None else 0
-        gemma4_merged_total_tokens = (gemma4_merged_reason_tokens + gemma4_merged_ans_tokens) if merged_adapter_8bit_outputs is not None else None
-        if merged_adapter_8bit_outputs is not None:
-            token_stats["gemma4_merged_adapter_8bit"]["answer"].append(gemma4_merged_ans_tokens)
-            token_stats["gemma4_merged_adapter_8bit"]["reasoning"].append(gemma4_merged_reason_tokens)
-            token_stats["gemma4_merged_adapter_8bit"]["total"].append(gemma4_merged_total_tokens)
+        # Step 4: Fine-Tuned Unmasked Baseline Model tokens
+        gemma4_unmasked_reason_tokens = count_tokens(merged_adapter_8bit_reasoning, tokenizer) if merged_adapter_8bit_reasoning is not None else 0
+        gemma4_unmasked_ans_tokens = count_tokens(out_merged_adapter_8bit, tokenizer) if out_merged_adapter_8bit is not None else 0
+        gemma4_unmasked_total_tokens = (gemma4_unmasked_reason_tokens + gemma4_unmasked_ans_tokens) if unmasked_outputs is not None else None
+        if unmasked_outputs is not None:
+            token_stats["gemma4_merged_adapter_8bit"]["answer"].append(gemma4_unmasked_ans_tokens)
+            token_stats["gemma4_merged_adapter_8bit"]["reasoning"].append(gemma4_unmasked_reason_tokens)
+            token_stats["gemma4_merged_adapter_8bit"]["total"].append(gemma4_unmasked_total_tokens)
+
+        # Step 5: Fine-Tuned Masked Empty-Trace Model tokens
+        gemma4_masked_reason_tokens = count_tokens(merged_adapter_8bit_masked_reasoning, tokenizer) if merged_adapter_8bit_masked_reasoning is not None else 0
+        gemma4_masked_ans_tokens = count_tokens(out_merged_adapter_8bit_masked, tokenizer) if out_merged_adapter_8bit_masked is not None else 0
+        gemma4_masked_total_tokens = (gemma4_masked_reason_tokens + gemma4_masked_ans_tokens) if masked_outputs is not None else None
+        if masked_outputs is not None:
+            token_stats["gemma4_merged_adapter_8bit_masked"]["answer"].append(gemma4_masked_ans_tokens)
+            token_stats["gemma4_merged_adapter_8bit_masked"]["reasoning"].append(gemma4_masked_reason_tokens)
+            token_stats["gemma4_merged_adapter_8bit_masked"]["total"].append(gemma4_masked_total_tokens)
 
         examples = few_shot_examples_per_sample[idx]
         fewshot1_original = examples[0]["user_input"] if len(examples) > 0 else None
@@ -732,7 +801,8 @@ def main() -> None:
         fewshot2_assistant = examples[1]["assistant"] if len(examples) > 1 else None
         status_thinking = classify_reasoning_trace(extract_output_text(thinking_outputs[idx])) if thinking_outputs else None
         status_few_shots = classify_reasoning_trace(extract_output_text(few_shot_outputs[idx])) if few_shot_outputs else None
-        status_merged_8bit = classify_reasoning_trace(raw_merged_8bit) if merged_adapter_8bit_outputs is not None else None
+        status_unmasked = classify_reasoning_trace(extract_output_text(unmasked_outputs[idx])) if unmasked_outputs is not None else None
+        status_masked = classify_reasoning_trace(extract_output_text(masked_outputs[idx])) if masked_outputs is not None else None
 
         result_entry = {
             "id": rec["id"],
@@ -768,13 +838,22 @@ def main() -> None:
             "assistant_gemma4_dynamic_few_shots_answer_tokens": gemma4_few_ans_tokens if few_shot_outputs is not None else None,
             "assistant_gemma4_dynamic_few_shots_total_tokens": gemma4_few_total_tokens,
             "assistant_gemma4_dynamic_few_shots_metrics": gemma4_few_shots_metrics,
-            "assistant_gemma4_merged_adapter_8bit_reasoning": merged_adapter_8bit_reasoning,
-            "assistant_gemma4_merged_adapter_8bit_reasoning_tokens": gemma4_merged_reason_tokens if merged_adapter_8bit_outputs is not None else None,
-            "assistant_gemma4_merged_adapter_8bit_reasoning_status": status_merged_8bit,
+            # Step 4: Fine-Tuned Unmasked Baseline Model
             "assistant_gemma4_merged_adapter_8bit": out_merged_adapter_8bit,
-            "assistant_gemma4_merged_adapter_8bit_answer_tokens": gemma4_merged_ans_tokens if merged_adapter_8bit_outputs is not None else None,
-            "assistant_gemma4_merged_adapter_8bit_total_tokens": gemma4_merged_total_tokens,
             "assistant_gemma4_merged_adapter_8bit_metrics": gemma4_merged_adapter_8bit_metrics,
+            "assistant_gemma4_merged_adapter_8bit_reasoning": merged_adapter_8bit_reasoning,
+            "assistant_gemma4_merged_adapter_8bit_reasoning_tokens": gemma4_unmasked_reason_tokens if unmasked_outputs is not None else None,
+            "assistant_gemma4_merged_adapter_8bit_reasoning_status": status_unmasked,
+            "assistant_gemma4_merged_adapter_8bit_answer_tokens": gemma4_unmasked_ans_tokens if unmasked_outputs is not None else None,
+            "assistant_gemma4_merged_adapter_8bit_total_tokens": gemma4_unmasked_total_tokens,
+            # Step 5: Fine-Tuned Masked Empty-Trace Model
+            "assistant_gemma4_merged_adapter_8bit_masked": out_merged_adapter_8bit_masked,
+            "assistant_gemma4_merged_adapter_8bit_masked_metrics": gemma4_merged_adapter_8bit_masked_metrics,
+            "assistant_gemma4_merged_adapter_8bit_masked_reasoning": merged_adapter_8bit_masked_reasoning,
+            "assistant_gemma4_merged_adapter_8bit_masked_reasoning_tokens": gemma4_masked_reason_tokens if masked_outputs is not None else None,
+            "assistant_gemma4_merged_adapter_8bit_masked_reasoning_status": status_masked,
+            "assistant_gemma4_merged_adapter_8bit_masked_answer_tokens": gemma4_masked_ans_tokens if masked_outputs is not None else None,
+            "assistant_gemma4_merged_adapter_8bit_masked_total_tokens": gemma4_masked_total_tokens,
         }
         results.append(result_entry)
 
@@ -787,49 +866,62 @@ def main() -> None:
     # Compute structural reasoning metrics across full evaluation set
     struct_metrics_thinking = compute_structural_reasoning_metrics(thinking_outputs)
     struct_metrics_few_shots = compute_structural_reasoning_metrics(few_shot_outputs)
-    struct_metrics_merged_8bit = compute_structural_reasoning_metrics(merged_adapter_8bit_outputs)
+    struct_metrics_unmasked = compute_structural_reasoning_metrics(unmasked_outputs)
+    struct_metrics_masked = compute_structural_reasoning_metrics(masked_outputs)
 
     print(f"[SUCCESS] Wrote {len(results)} evaluated results with textstat metrics to: {RESULTS_OUTPUT_PATH}")
     print("=" * 60)
     print("      Evaluation Summary Metrics (Dataset Averages)")
     print("=" * 60)
     num_eval_ds = len(fre_scores["ground_truth"])
-    if num_eval_ds > 0:
-        avg_in_fre = sum(fre_scores["input"]) / num_eval_ds
-        avg_gt_fre = sum(fre_scores["ground_truth"]) / num_eval_ds
-        avg_in_wstf = sum(wstf_scores["input"]) / num_eval_ds
-        avg_gt_wstf = sum(wstf_scores["ground_truth"]) / num_eval_ds
+    avg_in_fre = sum(fre_scores["input"]) / num_eval_ds if num_eval_ds > 0 else 0.0
+    avg_gt_fre = sum(fre_scores["ground_truth"]) / num_eval_ds if num_eval_ds > 0 else 0.0
+    avg_in_wstf = sum(wstf_scores["input"]) / num_eval_ds if num_eval_ds > 0 else 0.0
+    avg_gt_wstf = sum(wstf_scores["ground_truth"]) / num_eval_ds if num_eval_ds > 0 else 0.0
 
+    avg_g4_fre = sum(fre_scores["gemma4"]) / len(fre_scores["gemma4"]) if fre_scores["gemma4"] else None
+    avg_g4_wstf = sum(wstf_scores["gemma4"]) / len(wstf_scores["gemma4"]) if wstf_scores["gemma4"] else None
+
+    avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / len(fre_scores["gemma4_thinking"]) if fre_scores["gemma4_thinking"] else None
+    avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / len(wstf_scores["gemma4_thinking"]) if wstf_scores["gemma4_thinking"] else None
+
+    avg_g4_few_fre = sum(fre_scores["gemma4_dynamic_few_shots"]) / len(fre_scores["gemma4_dynamic_few_shots"]) if fre_scores["gemma4_dynamic_few_shots"] else None
+    avg_g4_few_wstf = sum(wstf_scores["gemma4_dynamic_few_shots"]) / len(wstf_scores["gemma4_dynamic_few_shots"]) if wstf_scores["gemma4_dynamic_few_shots"] else None
+
+    avg_g4_merged_8bit_fre = sum(fre_scores["gemma4_merged_adapter_8bit"]) / len(fre_scores["gemma4_merged_adapter_8bit"]) if fre_scores["gemma4_merged_adapter_8bit"] else None
+    avg_g4_merged_8bit_wstf = sum(wstf_scores["gemma4_merged_adapter_8bit"]) / len(wstf_scores["gemma4_merged_adapter_8bit"]) if wstf_scores["gemma4_merged_adapter_8bit"] else None
+
+    avg_g4_masked_fre = sum(fre_scores["gemma4_merged_adapter_8bit_masked"]) / len(fre_scores["gemma4_merged_adapter_8bit_masked"]) if fre_scores["gemma4_merged_adapter_8bit_masked"] else None
+    avg_g4_masked_wstf = sum(wstf_scores["gemma4_merged_adapter_8bit_masked"]) / len(wstf_scores["gemma4_merged_adapter_8bit_masked"]) if wstf_scores["gemma4_merged_adapter_8bit_masked"] else None
+
+    if num_eval_ds > 0:
         print(f"  * Input Standardsprache         : FRE = {avg_in_fre:.1f}  |  WSTF = {avg_in_wstf:.1f}")
         print(f"  * Ground Truth (Target)         : FRE = {avg_gt_fre:.1f}  |  WSTF = {avg_gt_wstf:.1f}")
 
-        if fre_scores["gemma4"]:
-            avg_g4_fre = sum(fre_scores["gemma4"]) / len(fre_scores["gemma4"])
-            avg_g4_wstf = sum(wstf_scores["gemma4"]) / len(wstf_scores["gemma4"])
+        if avg_g4_fre is not None and avg_g4_wstf is not None:
             print(f"  * Gemma 4 (Zero-Shot)           : FRE = {avg_g4_fre:.1f}  |  WSTF = {avg_g4_wstf:.1f}")
 
-        if fre_scores["gemma4_thinking"]:
-            avg_g4_think_fre = sum(fre_scores["gemma4_thinking"]) / len(fre_scores["gemma4_thinking"])
-            avg_g4_think_wstf = sum(wstf_scores["gemma4_thinking"]) / len(wstf_scores["gemma4_thinking"])
+        if avg_g4_think_fre is not None and avg_g4_think_wstf is not None:
             print(f"  * Gemma 4 (With Thinking)       : FRE = {avg_g4_think_fre:.1f}  |  WSTF = {avg_g4_think_wstf:.1f}")
 
-        if fre_scores["gemma4_dynamic_few_shots"]:
-            avg_g4_few_fre = sum(fre_scores["gemma4_dynamic_few_shots"]) / len(fre_scores["gemma4_dynamic_few_shots"])
-            avg_g4_few_wstf = sum(wstf_scores["gemma4_dynamic_few_shots"]) / len(wstf_scores["gemma4_dynamic_few_shots"])
+        if avg_g4_few_fre is not None and avg_g4_few_wstf is not None:
             print(f"  * Gemma 4 (Few-Shots + Thinking): FRE = {avg_g4_few_fre:.1f}  |  WSTF = {avg_g4_few_wstf:.1f}")
 
-        if fre_scores["gemma4_merged_adapter_8bit"]:
-            avg_g4_merged_8bit_fre = sum(fre_scores["gemma4_merged_adapter_8bit"]) / len(fre_scores["gemma4_merged_adapter_8bit"])
-            avg_g4_merged_8bit_wstf = sum(wstf_scores["gemma4_merged_adapter_8bit"]) / len(wstf_scores["gemma4_merged_adapter_8bit"])
-            print(f"  * Gemma 4 (Merged 8-bit + Think): FRE = {avg_g4_merged_8bit_fre:.1f}  |  WSTF = {avg_g4_merged_8bit_wstf:.1f}")
+        if avg_g4_merged_8bit_fre is not None and avg_g4_merged_8bit_wstf is not None:
+            print(f"  * Gemma 4 (Unmasked FT Baseline): FRE = {avg_g4_merged_8bit_fre:.1f}  |  WSTF = {avg_g4_merged_8bit_wstf:.1f}")
+
+        if avg_g4_masked_fre is not None and avg_g4_masked_wstf is not None:
+            print(f"  * Gemma 4 (Masked Empty-Trace)  : FRE = {avg_g4_masked_fre:.1f}  |  WSTF = {avg_g4_masked_wstf:.1f}")
 
     print("\n  --- Structural Reasoning Reliability Metrics (arXiv:2605.21127v1) ---")
     if struct_metrics_thinking["total"] > 0:
         print(f"  * Step 2 (Base + Think)         : VR = {struct_metrics_thinking['valid_reasoning_rate']}% | ER = {struct_metrics_thinking['empty_reasoning_rate']}% | MR = {struct_metrics_thinking['missing_reasoning_rate']}% | TR = {struct_metrics_thinking['truncated_reasoning_rate']}%")
     if struct_metrics_few_shots["total"] > 0:
         print(f"  * Step 3 (Few-Shot + Think)     : VR = {struct_metrics_few_shots['valid_reasoning_rate']}% | ER = {struct_metrics_few_shots['empty_reasoning_rate']}% | MR = {struct_metrics_few_shots['missing_reasoning_rate']}% | TR = {struct_metrics_few_shots['truncated_reasoning_rate']}%")
-    if struct_metrics_merged_8bit["total"] > 0:
-        print(f"  * Step 4 (Merged 8-bit + Think) : VR = {struct_metrics_merged_8bit['valid_reasoning_rate']}% | ER = {struct_metrics_merged_8bit['empty_reasoning_rate']}% | MR = {struct_metrics_merged_8bit['missing_reasoning_rate']}% | TR = {struct_metrics_merged_8bit['truncated_reasoning_rate']}%")
+    if struct_metrics_unmasked["total"] > 0:
+        print(f"  * Step 4 (Unmasked FT Baseline) : VR = {struct_metrics_unmasked['valid_reasoning_rate']}% | ER = {struct_metrics_unmasked['empty_reasoning_rate']}% | MR = {struct_metrics_unmasked['missing_reasoning_rate']}% | TR = {struct_metrics_unmasked['truncated_reasoning_rate']}%")
+    if struct_metrics_masked["total"] > 0:
+        print(f"  * Step 5 (Masked Empty-Trace)   : VR = {struct_metrics_masked['valid_reasoning_rate']}% | ER = {struct_metrics_masked['empty_reasoning_rate']}% | MR = {struct_metrics_masked['missing_reasoning_rate']}% | TR = {struct_metrics_masked['truncated_reasoning_rate']}%")
 
     def compute_avg_token_stats(stats_dict):
         if not stats_dict["total"]:
@@ -859,6 +951,7 @@ def main() -> None:
         "assistant_gemma4_thinking": compute_avg_token_stats(token_stats["gemma4_thinking"]),
         "assistant_gemma4_dynamic_few_shots": compute_avg_token_stats(token_stats["gemma4_dynamic_few_shots"]),
         "assistant_gemma4_merged_adapter_8bit": compute_avg_token_stats(token_stats["gemma4_merged_adapter_8bit"]),
+        "assistant_gemma4_merged_adapter_8bit_masked": compute_avg_token_stats(token_stats["gemma4_merged_adapter_8bit_masked"]),
     }
     avg_in_tokens = round(sum(token_stats["input"]) / len(token_stats["input"]), 1) if token_stats["input"] else 0.0
     avg_gt_tokens = round(sum(token_stats["ground_truth"]) / len(token_stats["ground_truth"]), 1) if token_stats["ground_truth"] else 0.0
@@ -877,7 +970,10 @@ def main() -> None:
         print(f"  * Step 3 (Few-Shot + Think)     : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
     if token_stats["gemma4_merged_adapter_8bit"]["total"]:
         st = token_summary["assistant_gemma4_merged_adapter_8bit"]
-        print(f"  * Step 4 (Merged 8-bit + Think) : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
+        print(f"  * Step 4 (Unmasked FT Baseline) : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
+    if token_stats["gemma4_merged_adapter_8bit_masked"]["total"]:
+        st = token_summary["assistant_gemma4_merged_adapter_8bit_masked"]
+        print(f"  * Step 5 (Masked Empty-Trace)   : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}")
 
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
     print("=" * 60)
@@ -886,7 +982,8 @@ def main() -> None:
     assistant_gemma4_speed = calculate_speed(no_thinking_outputs, step1_elapsed or 0, tokenizer)
     assistant_gemma4_thinking_speed = calculate_speed(thinking_outputs, step2_elapsed or 0, tokenizer)
     assistant_gemma4_dynamic_few_shots_speed = calculate_speed(few_shot_outputs, step3_elapsed or 0, tokenizer)
-    assistant_gemma4_merged_adapter_8bit_speed = calculate_speed(merged_adapter_8bit_outputs, step4_elapsed or 0, tokenizer)
+    assistant_gemma4_merged_adapter_8bit_speed = calculate_speed(unmasked_outputs, step4_elapsed or 0, tokenizer)
+    assistant_gemma4_merged_adapter_8bit_masked_speed = calculate_speed(masked_outputs, step5_elapsed or 0, tokenizer)
 
     metadata = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -896,18 +993,21 @@ def main() -> None:
             "step1_base_zero_shot": round(step1_elapsed, 2) if step1_elapsed is not None else None,
             "step2_base_thinking": round(step2_elapsed, 2) if step2_elapsed is not None else None,
             "step3_base_few_shots": round(step3_elapsed, 2) if step3_elapsed is not None else None,
-            "step4_merged_adapter_8bit": round(step4_elapsed, 2) if step4_elapsed is not None else None,
+            "step4_unmasked_baseline": round(step4_elapsed, 2) if step4_elapsed is not None else None,
+            "step5_masked_empty_trace": round(step5_elapsed, 2) if step5_elapsed is not None else None,
         },
         "model_speeds_tokens_per_second": {
             "assistant_gemma4_speed": assistant_gemma4_speed,
             "assistant_gemma4_thinking_speed": assistant_gemma4_thinking_speed,
             "assistant_gemma4_dynamic_few_shots_speed": assistant_gemma4_dynamic_few_shots_speed,
             "assistant_gemma4_merged_adapter_8bit_speed": assistant_gemma4_merged_adapter_8bit_speed,
+            "assistant_gemma4_merged_adapter_8bit_masked_speed": assistant_gemma4_merged_adapter_8bit_masked_speed,
         },
         "structural_reasoning_metrics": {
             "step2_base_thinking": struct_metrics_thinking,
             "step3_base_few_shots": struct_metrics_few_shots,
-            "step4_merged_adapter_8bit": struct_metrics_merged_8bit,
+            "step4_unmasked_baseline": struct_metrics_unmasked,
+            "step5_masked_empty_trace": struct_metrics_masked,
         },
         "token_statistics": {
             "input_standardsprache": {
@@ -932,35 +1032,43 @@ def main() -> None:
                 "avg_tokens": avg_gt_tokens,
             },
             "assistant_gemma4": {
-                "fre": round(avg_g4_fre, 1) if fre_scores["gemma4"] else None,
-                "wstf": round(avg_g4_wstf, 1) if wstf_scores["gemma4"] else None,
+                "fre": round(avg_g4_fre, 1) if avg_g4_fre is not None else None,
+                "wstf": round(avg_g4_wstf, 1) if avg_g4_wstf is not None else None,
                 "speed_tokens_per_sec": assistant_gemma4_speed,
                 "avg_answer_tokens": token_summary["assistant_gemma4"]["avg_answer_tokens"] if token_stats["gemma4"]["total"] else None,
                 "avg_total_tokens": token_summary["assistant_gemma4"]["avg_total_tokens"] if token_stats["gemma4"]["total"] else None,
             },
             "assistant_gemma4_thinking": {
-                "fre": round(avg_g4_think_fre, 1) if fre_scores["gemma4_thinking"] else None,
-                "wstf": round(avg_g4_think_wstf, 1) if wstf_scores["gemma4_thinking"] else None,
+                "fre": round(avg_g4_think_fre, 1) if avg_g4_think_fre is not None else None,
+                "wstf": round(avg_g4_think_wstf, 1) if avg_g4_think_wstf is not None else None,
                 "speed_tokens_per_sec": assistant_gemma4_thinking_speed,
                 "avg_reasoning_tokens": token_summary["assistant_gemma4_thinking"]["avg_reasoning_tokens"] if token_stats["gemma4_thinking"]["total"] else None,
                 "avg_answer_tokens": token_summary["assistant_gemma4_thinking"]["avg_answer_tokens"] if token_stats["gemma4_thinking"]["total"] else None,
                 "avg_total_tokens": token_summary["assistant_gemma4_thinking"]["avg_total_tokens"] if token_stats["gemma4_thinking"]["total"] else None,
             },
             "assistant_gemma4_dynamic_few_shots": {
-                "fre": round(avg_g4_few_fre, 1) if fre_scores["gemma4_dynamic_few_shots"] else None,
-                "wstf": round(avg_g4_few_wstf, 1) if wstf_scores["gemma4_dynamic_few_shots"] else None,
+                "fre": round(avg_g4_few_fre, 1) if avg_g4_few_fre is not None else None,
+                "wstf": round(avg_g4_few_wstf, 1) if avg_g4_few_wstf is not None else None,
                 "speed_tokens_per_sec": assistant_gemma4_dynamic_few_shots_speed,
                 "avg_reasoning_tokens": token_summary["assistant_gemma4_dynamic_few_shots"]["avg_reasoning_tokens"] if token_stats["gemma4_dynamic_few_shots"]["total"] else None,
                 "avg_answer_tokens": token_summary["assistant_gemma4_dynamic_few_shots"]["avg_answer_tokens"] if token_stats["gemma4_dynamic_few_shots"]["total"] else None,
                 "avg_total_tokens": token_summary["assistant_gemma4_dynamic_few_shots"]["avg_total_tokens"] if token_stats["gemma4_dynamic_few_shots"]["total"] else None,
             },
             "assistant_gemma4_merged_adapter_8bit": {
-                "fre": round(avg_g4_merged_8bit_fre, 1) if fre_scores["gemma4_merged_adapter_8bit"] else None,
-                "wstf": round(avg_g4_merged_8bit_wstf, 1) if wstf_scores["gemma4_merged_adapter_8bit"] else None,
+                "fre": round(avg_g4_merged_8bit_fre, 1) if avg_g4_merged_8bit_fre is not None else None,
+                "wstf": round(avg_g4_merged_8bit_wstf, 1) if avg_g4_merged_8bit_wstf is not None else None,
                 "speed_tokens_per_sec": assistant_gemma4_merged_adapter_8bit_speed,
                 "avg_reasoning_tokens": token_summary["assistant_gemma4_merged_adapter_8bit"]["avg_reasoning_tokens"] if token_stats["gemma4_merged_adapter_8bit"]["total"] else None,
                 "avg_answer_tokens": token_summary["assistant_gemma4_merged_adapter_8bit"]["avg_answer_tokens"] if token_stats["gemma4_merged_adapter_8bit"]["total"] else None,
                 "avg_total_tokens": token_summary["assistant_gemma4_merged_adapter_8bit"]["avg_total_tokens"] if token_stats["gemma4_merged_adapter_8bit"]["total"] else None,
+            },
+            "assistant_gemma4_merged_adapter_8bit_masked": {
+                "fre": round(avg_g4_masked_fre, 1) if avg_g4_masked_fre is not None else None,
+                "wstf": round(avg_g4_masked_wstf, 1) if avg_g4_masked_wstf is not None else None,
+                "speed_tokens_per_sec": assistant_gemma4_merged_adapter_8bit_masked_speed,
+                "avg_reasoning_tokens": token_summary["assistant_gemma4_merged_adapter_8bit_masked"]["avg_reasoning_tokens"] if token_stats["gemma4_merged_adapter_8bit_masked"]["total"] else None,
+                "avg_answer_tokens": token_summary["assistant_gemma4_merged_adapter_8bit_masked"]["avg_answer_tokens"] if token_stats["gemma4_merged_adapter_8bit_masked"]["total"] else None,
+                "avg_total_tokens": token_summary["assistant_gemma4_merged_adapter_8bit_masked"]["avg_total_tokens"] if token_stats["gemma4_merged_adapter_8bit_masked"]["total"] else None,
             },
         },
     }
