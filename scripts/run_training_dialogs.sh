@@ -76,6 +76,7 @@ mkdir -p "${HF_CACHE_DIR}" "${HOME}/.local" "${WORKSPACE_ROOT}/local/adapters" "
 # Ensure stale prepared dataset and adapter output directories are cleared
 rm -rf "${WORKSPACE_ROOT}/last_run_prepared"
 rm -rf "${WORKSPACE_ROOT}/local/adapters/gemma-4-26b-a4b-it-lora_dialogs"
+rm -rf "${WORKSPACE_ROOT}/local/adapters/gemma-4-26b-a4b-it-lora_dialogs_masked"
 rm -rf "${WORKSPACE_ROOT}/local/merged"
 
 # ------------------------------------------------------------------------------
@@ -154,5 +155,5 @@ apptainer exec \
 echo ""
 echo "============================================================"
 echo "[SUCCESS] Dialogs Pipeline Complete! Fine-tuned FP8 model is ready at:"
-echo "          ${WORKSPACE_ROOT}/local/models/gemma-4-26b-a4b-it-fp8_dialogs"
+echo "          ${WORKSPACE_ROOT}/local/models/gemma-4-26b-a4b-it-fp8_dialogs_masked"
 echo "============================================================"
