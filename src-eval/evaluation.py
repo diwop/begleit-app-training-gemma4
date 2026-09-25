@@ -71,9 +71,8 @@ MAX_INPUT_TOKENS = MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - 512
 MAX_EVAL_SAMPLES = int(os.environ.get("MAX_EVAL_SAMPLES", "0"))
 
 BASE_MODEL_NAME = "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
-UNMASKED_MODEL_PATH = Path(os.environ.get("UNMASKED_MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8-unmasked"))
-MASKED_MODEL_PATH = Path(os.environ.get("MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8"))
-MERGED_MODEL_PATH = MASKED_MODEL_PATH  # Alias for backward compatibility
+MERGED_MODEL_PATH = Path(os.environ.get("MERGED_MODEL", "local/models/gemma-4-26b-a4b-it-fp8"))
+MERGED_MODEL_MASKED_PATH = Path(os.environ.get("MERGED_MODEL_MASKED", "local/models/gemma-4-26b-a4b-it-fp8-masked"))
 EVAL_DATA_PATH = Path("data/dataset_eval.jsonl")
 TRAIN_DATA_PATH = Path("data/dataset_train.jsonl")
 RESULTS_OUTPUT_PATH = Path(os.environ.get("EVAL_RESULTS_OUTPUT", "data/results.jsonl"))
@@ -375,11 +374,12 @@ def main() -> None:
     print("=" * 60)
     print("      Gemma 4 Evaluation: FP8 Base, Few-Shot & Merged 8-bit")
     print("=" * 60)
-    print(f"[INFO] Base FP8 Model   : {BASE_MODEL_NAME}")
-    print(f"[INFO] Merged Model Path: {MERGED_MODEL_PATH}")
-    print(f"[INFO] Input Dataset    : {EVAL_DATA_PATH}")
-    print(f"[INFO] Output Results   : {RESULTS_OUTPUT_PATH}")
-    print(f"[INFO] Output Metadata  : {RESULTS_METADATA_PATH}")
+    print(f"[INFO] Base FP8 Model          : {BASE_MODEL_NAME}")
+    print(f"[INFO] Merged Model Path       : {MERGED_MODEL_PATH}")
+    print(f"[INFO] Merged Masked Model Path: {MERGED_MODEL_MASKED_PATH}")
+    print(f"[INFO] Input Dataset           : {EVAL_DATA_PATH}")
+    print(f"[INFO] Output Results          : {RESULTS_OUTPUT_PATH}")
+    print(f"[INFO] Output Metadata         : {RESULTS_METADATA_PATH}")
 
     gpu_count = torch.cuda.device_count()
     tp_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
@@ -532,13 +532,13 @@ def main() -> None:
     # =========================================================================
     # STEP 4: Fine-Tuned Unmasked Baseline Model Evaluation
     # =========================================================================
-    unmasked_outputs = None
+    merged_outputs = None
     step4_elapsed = None
-    if UNMASKED_MODEL_PATH.exists():
+    if MERGED_MODEL_PATH.exists():
         print("=" * 60)
-        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Unmasked Model ({UNMASKED_MODEL_PATH})...")
-        unmasked_engine = sgl.Engine(
-            model_path=str(UNMASKED_MODEL_PATH),
+        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Unmasked Model ({MERGED_MODEL_PATH})...")
+        merged_engine = sgl.Engine(
+            model_path=str(MERGED_MODEL_PATH),
             tp_size=tp_size,
             trust_remote_code=True,
             mem_fraction_static=0.85,
@@ -552,31 +552,31 @@ def main() -> None:
         print(f"[INFO] Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         step4_start = time.time()
 
-        unmasked_outputs = unmasked_engine.generate(prompts_thinking, sampling_params_thinking)
+        merged_outputs = merged_engine.generate(prompts_thinking, sampling_params_thinking)
 
         step4_elapsed = time.time() - step4_start
         print(f"[SUCCESS] Step 4/5 (Unmasked Baseline + Think) completed in {step4_elapsed:.1f}s ({step4_elapsed/len(records):.2f}s/sample)\n")
 
-        unmasked_engine.shutdown()
-        del unmasked_engine
+        merged_engine.shutdown()
+        del merged_engine
         time.sleep(3)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             gc.collect()
     else:
         print("=" * 60)
-        print(f"[INFO] [STEP 4/5] Fine-tuned unmasked baseline model not found at '{UNMASKED_MODEL_PATH}'. Skipping Step 4.\n")
+        print(f"[INFO] [STEP 4/5] Fine-tuned unmasked baseline model not found at '{MERGED_MODEL_PATH}'. Skipping Step 4.\n")
 
     # =========================================================================
     # STEP 5: Fine-Tuned Masked Empty-Trace Model Evaluation (arXiv:2605.21127v1)
     # =========================================================================
     masked_outputs = None
     step5_elapsed = None
-    if MASKED_MODEL_PATH.exists():
+    if MERGED_MODEL_MASKED_PATH.exists():
         print("=" * 60)
-        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Masked Model ({MASKED_MODEL_PATH})...")
+        print(f"[INFO] Initializing SGLang engine for Fine-Tuned Masked Model ({MERGED_MODEL_MASKED_PATH})...")
         masked_engine = sgl.Engine(
-            model_path=str(MASKED_MODEL_PATH),
+            model_path=str(MERGED_MODEL_MASKED_PATH),
             tp_size=tp_size,
             trust_remote_code=True,
             mem_fraction_static=0.85,
@@ -603,7 +603,7 @@ def main() -> None:
             gc.collect()
     else:
         print("=" * 60)
-        print(f"[INFO] [STEP 5/5] Fine-tuned masked model not found at '{MASKED_MODEL_PATH}'. Skipping Step 5.\n")
+        print(f"[INFO] [STEP 5/5] Fine-tuned masked model not found at '{MERGED_MODEL_MASKED_PATH}'. Skipping Step 5.\n")
 
     # =========================================================================
     # Assemble Results & Calculate Readability Metrics
@@ -700,9 +700,9 @@ def main() -> None:
         out_merged_adapter_8bit = None
         merged_adapter_8bit_reasoning = None
         gemma4_merged_adapter_8bit_metrics = None
-        if unmasked_outputs is not None:
-            raw_unmasked = extract_output_text(unmasked_outputs[idx])
-            merged_adapter_8bit_reasoning, out_merged_adapter_8bit = extract_gemma4_reasoning(raw_unmasked)
+        if merged_outputs is not None:
+            raw_merged = extract_output_text(merged_outputs[idx])
+            merged_adapter_8bit_reasoning, out_merged_adapter_8bit = extract_gemma4_reasoning(raw_merged)
             gemma4_merged_adapter_8bit_metrics = get_raw_metrics(out_merged_adapter_8bit)
 
         # Step 5: Fine-Tuned Masked Empty-Trace Model outputs
@@ -777,13 +777,13 @@ def main() -> None:
             token_stats["gemma4_dynamic_few_shots"]["total"].append(gemma4_few_total_tokens)
 
         # Step 4: Fine-Tuned Unmasked Baseline Model tokens
-        gemma4_unmasked_reason_tokens = count_tokens(merged_adapter_8bit_reasoning, tokenizer) if merged_adapter_8bit_reasoning is not None else 0
-        gemma4_unmasked_ans_tokens = count_tokens(out_merged_adapter_8bit, tokenizer) if out_merged_adapter_8bit is not None else 0
-        gemma4_unmasked_total_tokens = (gemma4_unmasked_reason_tokens + gemma4_unmasked_ans_tokens) if unmasked_outputs is not None else None
-        if unmasked_outputs is not None:
-            token_stats["gemma4_merged_adapter_8bit"]["answer"].append(gemma4_unmasked_ans_tokens)
-            token_stats["gemma4_merged_adapter_8bit"]["reasoning"].append(gemma4_unmasked_reason_tokens)
-            token_stats["gemma4_merged_adapter_8bit"]["total"].append(gemma4_unmasked_total_tokens)
+        gemma4_merged_reason_tokens = count_tokens(merged_adapter_8bit_reasoning, tokenizer) if merged_adapter_8bit_reasoning is not None else 0
+        gemma4_merged_ans_tokens = count_tokens(out_merged_adapter_8bit, tokenizer) if out_merged_adapter_8bit is not None else 0
+        gemma4_merged_total_tokens = (gemma4_merged_reason_tokens + gemma4_merged_ans_tokens) if merged_outputs is not None else None
+        if merged_outputs is not None:
+            token_stats["gemma4_merged_adapter_8bit"]["answer"].append(gemma4_merged_ans_tokens)
+            token_stats["gemma4_merged_adapter_8bit"]["reasoning"].append(gemma4_merged_reason_tokens)
+            token_stats["gemma4_merged_adapter_8bit"]["total"].append(gemma4_merged_total_tokens)
 
         # Step 5: Fine-Tuned Masked Empty-Trace Model tokens
         gemma4_masked_reason_tokens = count_tokens(merged_adapter_8bit_masked_reasoning, tokenizer) if merged_adapter_8bit_masked_reasoning is not None else 0
@@ -801,7 +801,7 @@ def main() -> None:
         fewshot2_assistant = examples[1]["assistant"] if len(examples) > 1 else None
         status_thinking = classify_reasoning_trace(extract_output_text(thinking_outputs[idx])) if thinking_outputs else None
         status_few_shots = classify_reasoning_trace(extract_output_text(few_shot_outputs[idx])) if few_shot_outputs else None
-        status_unmasked = classify_reasoning_trace(extract_output_text(unmasked_outputs[idx])) if unmasked_outputs is not None else None
+        status_merged = classify_reasoning_trace(extract_output_text(merged_outputs[idx])) if merged_outputs is not None else None
         status_masked = classify_reasoning_trace(extract_output_text(masked_outputs[idx])) if masked_outputs is not None else None
 
         result_entry = {
@@ -842,10 +842,10 @@ def main() -> None:
             "assistant_gemma4_merged_adapter_8bit": out_merged_adapter_8bit,
             "assistant_gemma4_merged_adapter_8bit_metrics": gemma4_merged_adapter_8bit_metrics,
             "assistant_gemma4_merged_adapter_8bit_reasoning": merged_adapter_8bit_reasoning,
-            "assistant_gemma4_merged_adapter_8bit_reasoning_tokens": gemma4_unmasked_reason_tokens if unmasked_outputs is not None else None,
-            "assistant_gemma4_merged_adapter_8bit_reasoning_status": status_unmasked,
-            "assistant_gemma4_merged_adapter_8bit_answer_tokens": gemma4_unmasked_ans_tokens if unmasked_outputs is not None else None,
-            "assistant_gemma4_merged_adapter_8bit_total_tokens": gemma4_unmasked_total_tokens,
+            "assistant_gemma4_merged_adapter_8bit_reasoning_tokens": gemma4_merged_reason_tokens if merged_outputs is not None else None,
+            "assistant_gemma4_merged_adapter_8bit_reasoning_status": status_merged,
+            "assistant_gemma4_merged_adapter_8bit_answer_tokens": gemma4_merged_ans_tokens if merged_outputs is not None else None,
+            "assistant_gemma4_merged_adapter_8bit_total_tokens": gemma4_merged_total_tokens,
             # Step 5: Fine-Tuned Masked Empty-Trace Model
             "assistant_gemma4_merged_adapter_8bit_masked": out_merged_adapter_8bit_masked,
             "assistant_gemma4_merged_adapter_8bit_masked_metrics": gemma4_merged_adapter_8bit_masked_metrics,
@@ -866,7 +866,7 @@ def main() -> None:
     # Compute structural reasoning metrics across full evaluation set
     struct_metrics_thinking = compute_structural_reasoning_metrics(thinking_outputs)
     struct_metrics_few_shots = compute_structural_reasoning_metrics(few_shot_outputs)
-    struct_metrics_unmasked = compute_structural_reasoning_metrics(unmasked_outputs)
+    struct_metrics_merged = compute_structural_reasoning_metrics(merged_outputs)
     struct_metrics_masked = compute_structural_reasoning_metrics(masked_outputs)
 
     print(f"[SUCCESS] Wrote {len(results)} evaluated results with textstat metrics to: {RESULTS_OUTPUT_PATH}")
@@ -918,8 +918,8 @@ def main() -> None:
         print(f"  * Step 2 (Base + Think)         : VR = {struct_metrics_thinking['valid_reasoning_rate']}% | ER = {struct_metrics_thinking['empty_reasoning_rate']}% | MR = {struct_metrics_thinking['missing_reasoning_rate']}% | TR = {struct_metrics_thinking['truncated_reasoning_rate']}%")
     if struct_metrics_few_shots["total"] > 0:
         print(f"  * Step 3 (Few-Shot + Think)     : VR = {struct_metrics_few_shots['valid_reasoning_rate']}% | ER = {struct_metrics_few_shots['empty_reasoning_rate']}% | MR = {struct_metrics_few_shots['missing_reasoning_rate']}% | TR = {struct_metrics_few_shots['truncated_reasoning_rate']}%")
-    if struct_metrics_unmasked["total"] > 0:
-        print(f"  * Step 4 (Unmasked FT Baseline) : VR = {struct_metrics_unmasked['valid_reasoning_rate']}% | ER = {struct_metrics_unmasked['empty_reasoning_rate']}% | MR = {struct_metrics_unmasked['missing_reasoning_rate']}% | TR = {struct_metrics_unmasked['truncated_reasoning_rate']}%")
+    if struct_metrics_merged["total"] > 0:
+        print(f"  * Step 4 (Unmasked FT Baseline) : VR = {struct_metrics_merged['valid_reasoning_rate']}% | ER = {struct_metrics_merged['empty_reasoning_rate']}% | MR = {struct_metrics_merged['missing_reasoning_rate']}% | TR = {struct_metrics_merged['truncated_reasoning_rate']}%")
     if struct_metrics_masked["total"] > 0:
         print(f"  * Step 5 (Masked Empty-Trace)   : VR = {struct_metrics_masked['valid_reasoning_rate']}% | ER = {struct_metrics_masked['empty_reasoning_rate']}% | MR = {struct_metrics_masked['missing_reasoning_rate']}% | TR = {struct_metrics_masked['truncated_reasoning_rate']}%")
 
@@ -982,7 +982,7 @@ def main() -> None:
     assistant_gemma4_speed = calculate_speed(no_thinking_outputs, step1_elapsed or 0, tokenizer)
     assistant_gemma4_thinking_speed = calculate_speed(thinking_outputs, step2_elapsed or 0, tokenizer)
     assistant_gemma4_dynamic_few_shots_speed = calculate_speed(few_shot_outputs, step3_elapsed or 0, tokenizer)
-    assistant_gemma4_merged_adapter_8bit_speed = calculate_speed(unmasked_outputs, step4_elapsed or 0, tokenizer)
+    assistant_gemma4_merged_adapter_8bit_speed = calculate_speed(merged_outputs, step4_elapsed or 0, tokenizer)
     assistant_gemma4_merged_adapter_8bit_masked_speed = calculate_speed(masked_outputs, step5_elapsed or 0, tokenizer)
 
     metadata = {
@@ -993,8 +993,8 @@ def main() -> None:
             "step1_base_zero_shot": round(step1_elapsed, 2) if step1_elapsed is not None else None,
             "step2_base_thinking": round(step2_elapsed, 2) if step2_elapsed is not None else None,
             "step3_base_few_shots": round(step3_elapsed, 2) if step3_elapsed is not None else None,
-            "step4_unmasked_baseline": round(step4_elapsed, 2) if step4_elapsed is not None else None,
-            "step5_masked_empty_trace": round(step5_elapsed, 2) if step5_elapsed is not None else None,
+            "step4_merged_adapter_8bit": round(step4_elapsed, 2) if step4_elapsed is not None else None,
+            "step5_merged_adapter_8bit_masked": round(step5_elapsed, 2) if step5_elapsed is not None else None,
         },
         "model_speeds_tokens_per_second": {
             "assistant_gemma4_speed": assistant_gemma4_speed,
@@ -1006,8 +1006,8 @@ def main() -> None:
         "structural_reasoning_metrics": {
             "step2_base_thinking": struct_metrics_thinking,
             "step3_base_few_shots": struct_metrics_few_shots,
-            "step4_unmasked_baseline": struct_metrics_unmasked,
-            "step5_masked_empty_trace": struct_metrics_masked,
+            "step4_merged_adapter_8bit": struct_metrics_merged,
+            "step5_merged_adapter_8bit_masked": struct_metrics_masked,
         },
         "token_statistics": {
             "input_standardsprache": {
