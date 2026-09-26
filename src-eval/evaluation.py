@@ -420,16 +420,43 @@ def main() -> None:
             fitting_examples = []
         else:
             raw_user_in = extract_raw_standardsprache(text=rec.get("user", ""), doc_id=rec["id"])
+            system_tokens = len(tokenizer.encode(rec["system"], add_special_tokens=False))
+            sample_max_user_tokens = max(100, MAX_SEQUENCE_LENGTH - MAX_NEW_TOKENS - system_tokens - 256)
             fitting_examples = get_fitting_few_shot_examples(
                 query=raw_user_in,
                 tokenizer=tokenizer,
-                max_input_tokens=MAX_INPUT_TOKENS,
+                max_input_tokens=sample_max_user_tokens,
                 max_examples=2,
                 dataset_path=TRAIN_DATA_PATH,
             )
             few_shot_user_prompt = build_dynamic_few_shot_user_prompt(raw_user_in, fitting_examples)
+
+            # Strict verification of the rendered chat template length against context window
+            conv_test = [
+                {"role": "system", "content": rec["system"]},
+                {"role": "user", "content": few_shot_user_prompt},
+            ]
+            rendered_test = tokenizer.apply_chat_template(
+                conv_test,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=True,
+            )
+            total_prompt_tokens = len(tokenizer.encode(rendered_test, add_special_tokens=False))
+            while total_prompt_tokens + MAX_NEW_TOKENS > (MAX_SEQUENCE_LENGTH - 64) and fitting_examples:
+                fitting_examples.pop()
+                few_shot_user_prompt = build_dynamic_few_shot_user_prompt(raw_user_in, fitting_examples)
+                conv_test[1]["content"] = few_shot_user_prompt
+                rendered_test = tokenizer.apply_chat_template(
+                    conv_test,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=True,
+                )
+                total_prompt_tokens = len(tokenizer.encode(rendered_test, add_special_tokens=False))
+
             token_count = len(tokenizer.encode(few_shot_user_prompt, add_special_tokens=False))
-            print(f"[INFO] Sample '{rec['id']}': retrieved {len(fitting_examples)} few-shot demonstrations ({token_count} tokens).")
+            print(f"[INFO] Sample '{rec['id']}': retrieved {len(fitting_examples)} few-shot demonstrations ({token_count} user tokens, {total_prompt_tokens} total prompt tokens).")
 
         few_shot_examples_per_sample.append(fitting_examples)
         few_shot_conversations.append([
