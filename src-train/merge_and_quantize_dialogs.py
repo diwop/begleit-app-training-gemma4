@@ -159,10 +159,21 @@ def main() -> None:
         default="google/gemma-4-26b-a4b-it",
         help="Base model ID or local directory path",
     )
+    default_adapter = os.environ.get("ADAPTER_DIR", "")
+    if not default_adapter:
+        if Path("./local/adapters/gemma-4-26b-a4b-it-lora_dialogs_masked").exists():
+            default_adapter = "./local/adapters/gemma-4-26b-a4b-it-lora_dialogs_masked"
+        else:
+            default_adapter = "./local/adapters/gemma-4-26b-a4b-it-lora_dialogs"
+
+    default_output_fp8 = os.environ.get(
+        "MERGED_MODEL_MASKED", "./local/models/gemma-4-26b-a4b-it-fp8_dialogs_masked"
+    )
+
     parser.add_argument(
         "--adapter-dir",
         type=str,
-        default="./local/adapters/gemma-4-26b-a4b-it-lora_dialogs",
+        default=default_adapter,
         help="Path to trained LoRA adapter directory",
     )
     parser.add_argument(
@@ -174,7 +185,7 @@ def main() -> None:
     parser.add_argument(
         "--output-fp8-dir",
         type=str,
-        default="./local/models/gemma-4-26b-a4b-it-fp8_dialogs",
+        default=default_output_fp8,
         help="Output directory for compressed FP8 model",
     )
     parser.add_argument(
