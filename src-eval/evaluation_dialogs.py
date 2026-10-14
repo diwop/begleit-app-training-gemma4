@@ -445,9 +445,14 @@ def main() -> None:
 
     gpu_count = torch.cuda.device_count() if torch and torch.cuda.is_available() else 0
     tensor_parallel_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", "1"))
+    large_model_tp_size = (
+        max(tensor_parallel_size, min(gpu_count, 2))
+        if gpu_count >= 2
+        else tensor_parallel_size
+    )
     print(
-        f"[INFO] Detected GPUs       : {gpu_count} (Using Tensor Parallel Size:"
-        f" {tensor_parallel_size})"
+        f"[INFO] Detected GPUs       : {gpu_count} (31B/27B TP Size:"
+        f" {large_model_tp_size}, 26B-A4B TP Size: {tensor_parallel_size})"
     )
 
     records = load_eval_data(EVAL_DATA_PATH)
@@ -671,7 +676,7 @@ def main() -> None:
 
     g4_31b_engine = sgl.Engine(
         model_path=gemma4_31b_path,
-        tp_size=tensor_parallel_size,
+        tp_size=large_model_tp_size,
         trust_remote_code=True,
         mem_fraction_static=0.85,
         context_length=MAX_SEQUENCE_LENGTH,
@@ -724,7 +729,7 @@ def main() -> None:
 
     qwen_engine = sgl.Engine(
         model_path=qwen3_8_27b_path,
-        tp_size=tensor_parallel_size,
+        tp_size=large_model_tp_size,
         trust_remote_code=True,
         mem_fraction_static=0.85,
         context_length=MAX_SEQUENCE_LENGTH,
