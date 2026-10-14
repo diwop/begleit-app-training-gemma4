@@ -677,6 +677,7 @@ def main() -> None:
     g4_31b_engine = sgl.Engine(
         model_path=gemma4_31b_path,
         tp_size=large_model_tp_size,
+        disable_custom_all_reduce=True,
         trust_remote_code=True,
         mem_fraction_static=0.85,
         context_length=MAX_SEQUENCE_LENGTH,
@@ -730,6 +731,7 @@ def main() -> None:
     qwen_engine = sgl.Engine(
         model_path=qwen3_8_27b_path,
         tp_size=large_model_tp_size,
+        disable_custom_all_reduce=True,
         trust_remote_code=True,
         mem_fraction_static=0.85,
         context_length=MAX_SEQUENCE_LENGTH,
