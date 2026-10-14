@@ -17,12 +17,15 @@ The repository provides tailored helper scripts that handle Apptainer container 
 | :--- | :--- | :--- | :--- |
 | **Pull Data (Standard)** | `bash scripts/pull_data.sh` | **Login Node** (`hsuper-login01`) | Pulls standard DVC data from S3 using Apptainer and `.dvc-venv`. |
 | **Pull Data (Dialogs)** | `bash scripts/pull_data_dialogs.sh` | **Login Node** (`hsuper-login01`) | Pulls raw dialogs and stage outputs (`prepare_data_dialogs`, `prepare_few_shots_dialogs`). |
+| **Pull Data (Unidirectional Dialogs)** | `bash scripts/pull_data_dialogs_unidirectional.sh` | **Login Node** (`hsuper-login01`) | Pulls raw dialogs and stage outputs (`prepare_data_dialogs_unidirectional`, `prepare_few_shots_dialogs_unidirectional`). |
 | **Prepare Images** | `bash scripts/prepare_images.sh` | **Login Node** (`hsuper-login01`) | Pulls and extracts Apptainer sandbox images. |
 | **Download Models** | `bash scripts/download_models.sh` | **Login Node** (`hsuper-login01`) | Downloads base HuggingFace models to cluster cache. |
 | **Submit Training (Standard)** | `sbatch scripts/submit_training.sbatch` | **Login Node** | Submits Axolotl LoRA training job. |
 | **Submit Training (Dialogs)** | `sbatch scripts/submit_training_dialogs.sbatch` | **Login Node** | Submits dialog LoRA training + merge + FP8 quantization. |
+| **Submit Training (Unidirectional Dialogs)** | `sbatch scripts/submit_training_dialogs_unidirectional.sbatch` | **Login Node** | Submits unidirectional dialog LoRA training + merge + FP8 quantization. |
 | **Submit Evaluation (Standard)** | `sbatch scripts/submit_evaluation.sbatch` | **Login Node** | Submits SGLang evaluation job. |
 | **Submit Evaluation (Dialogs)** | `sbatch scripts/submit_evaluation_dialogs.sbatch` | **Login Node** | Submits dialog SGLang evaluation job. |
+| **Submit Evaluation (Unidirectional Dialogs)** | `sbatch scripts/submit_evaluation_dialogs_unidirectional.sbatch` | **Login Node** | Submits unidirectional dialog SGLang evaluation job. |
 
 ---
 
