@@ -12,6 +12,8 @@ HF_CACHE_DIR="${HOME}/.cache/huggingface"
 MODELS=(
   "google/gemma-4-26b-a4b-it"
   "RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic"
+  "RedHatAI/gemma-4-31B-it-FP8-dynamic"
+  "Qwen/Qwen3.8-27B-FP8"
   "intfloat/multilingual-e5-base"
 )
 
@@ -57,6 +59,8 @@ from huggingface_hub import snapshot_download
 models = [
     'google/gemma-4-26b-a4b-it',
     'RedHatAI/gemma-4-26B-A4B-it-FP8-Dynamic',
+    'RedHatAI/gemma-4-31B-it-FP8-dynamic',
+    'Qwen/Qwen3.8-27B-FP8',
     'intfloat/multilingual-e5-base',
 ]
 token = os.environ.get('HF_TOKEN', None)
