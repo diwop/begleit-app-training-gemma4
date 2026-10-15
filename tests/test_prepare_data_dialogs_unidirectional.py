@@ -218,10 +218,67 @@ def test_unidirectional_data_and_few_shots():
                 orig_fs_full
             )
 
+        # 3. Test evaluation_dialogs_unidirectional multi-model helpers & constants
+        import evaluation_dialogs_unidirectional
+
+        assert (
+            evaluation_dialogs_unidirectional.GEMMA4_31B_MODEL_NAME
+            == "RedHatAI/gemma-4-31B-it-FP8-dynamic"
+        )
+        assert (
+            evaluation_dialogs_unidirectional.QWEN3_8_27B_MODEL_NAME
+            == "Qwen/Qwen3.8-27B-FP8"
+        )
+
+        # Gemma 4 reasoning extraction
+        r_g4, ans_g4 = (
+            evaluation_dialogs_unidirectional.extract_gemma4_reasoning(
+                "<|channel>thought\nKurze Überlegung<channel|>\nÜBERSETZUNG\nDas ist leicht."
+            )
+        )
+        assert r_g4 == "Kurze Überlegung"
+        assert ans_g4 == "ÜBERSETZUNG\nDas ist leicht."
+
+        # Qwen pre-seeded <think> reasoning extraction
+        raw_qwen = evaluation_dialogs_unidirectional.extract_output_text(
+            {"text": "Schritt 1\n</think>\n\nÜBERSETZUNG\nDas ist leicht."},
+            preseeded_think=True,
+        )
+        assert raw_qwen.startswith("<think>\n")
+        r_qwen, ans_qwen = (
+            evaluation_dialogs_unidirectional.extract_gemma4_reasoning(
+                raw_qwen
+            )
+        )
+        assert r_qwen == "Schritt 1"
+        assert ans_qwen == "ÜBERSETZUNG\nDas ist leicht."
+
+        struct_qwen = (
+            evaluation_dialogs_unidirectional.compute_structural_reasoning_metrics(
+                [
+                    {
+                        "text": (
+                            "Schritt 1\n</think>\n\nÜBERSETZUNG\nDas ist leicht."
+                        )
+                    }
+                ],
+                preseeded_think=True,
+            )
+        )
+        assert struct_qwen["valid_reasoning_rate"] == 100.0
+
+        # Integrity check uses unidirectional template
+        ic = evaluation_dialogs_unidirectional.get_integrity_checks(
+            "System Prompt"
+        )
+        assert len(ic) == 2
+        assert "Bisherige Aussagen des Gesprächspartners:" in ic[1]["user"]
+
     print(
-        "[SUCCESS] All unidirectional dialogs data preparation and few-shot tests passed!"
+        "[SUCCESS] All unidirectional dialogs data preparation, few-shot, and evaluation tests passed!"
     )
 
 
 if __name__ == "__main__":
     test_unidirectional_data_and_few_shots()
+
