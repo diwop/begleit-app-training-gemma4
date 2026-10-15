@@ -918,21 +918,29 @@ def main() -> None:
         "input": [],
         "ground_truth": [],
         "gemma4_31b_dynamic_few_shots": {
+            "system": [],
+            "prompt": [],
             "answer": [],
             "reasoning": [],
             "total": [],
         },
         "qwen3_8_27b_dynamic_few_shots": {
+            "system": [],
+            "prompt": [],
             "answer": [],
             "reasoning": [],
             "total": [],
         },
         "gemma4_merged_adapter_8bit": {
+            "system": [],
+            "prompt": [],
             "answer": [],
             "reasoning": [],
             "total": [],
         },
         "gemma4_merged_adapter_8bit_masked": {
+            "system": [],
+            "prompt": [],
             "answer": [],
             "reasoning": [],
             "total": [],
@@ -1043,7 +1051,7 @@ def main() -> None:
                     gemma4_merged_adapter_8bit_masked_metrics["wstf"]
                 )
 
-        # Token counts for inputs and outputs (reasoning vs. answer)
+        # Token counts for inputs and outputs (system, prompt, reasoning, answer)
         user_input_tokens = count_tokens(raw_user_input, tokenizer)
         token_stats["input"].append(user_input_tokens)
 
@@ -1055,7 +1063,20 @@ def main() -> None:
         if assistant_gt_tokens is not None:
             token_stats["ground_truth"].append(assistant_gt_tokens)
 
+        few_shot_prompt_text = few_shot_conversations[idx][1]["content"]
+        zero_shot_prompt_text = rec["user"]
+
         # Step 1: Gemma 4 31B Dynamic Few-Shot Thinking tokens
+        g4_31b_few_sys_tokens = (
+            count_tokens(rec["system"], tokenizer_gemma4_31b)
+            if gemma4_31b_few_shot_outputs is not None
+            else None
+        )
+        g4_31b_few_prompt_tokens = (
+            count_tokens(few_shot_prompt_text, tokenizer_gemma4_31b)
+            if gemma4_31b_few_shot_outputs is not None
+            else None
+        )
         g4_31b_few_reason_tokens = (
             count_tokens(g4_31b_few_shots_reasoning, tokenizer_gemma4_31b)
             if g4_31b_few_shots_reasoning is not None
@@ -1072,6 +1093,12 @@ def main() -> None:
             else None
         )
         if gemma4_31b_few_shot_outputs is not None:
+            token_stats["gemma4_31b_dynamic_few_shots"]["system"].append(
+                g4_31b_few_sys_tokens
+            )
+            token_stats["gemma4_31b_dynamic_few_shots"]["prompt"].append(
+                g4_31b_few_prompt_tokens
+            )
             token_stats["gemma4_31b_dynamic_few_shots"]["answer"].append(
                 g4_31b_few_ans_tokens
             )
@@ -1083,6 +1110,16 @@ def main() -> None:
             )
 
         # Step 2: Qwen 3.8 27B Dynamic Few-Shot Thinking tokens
+        qwen_few_sys_tokens = (
+            count_tokens(rec["system"], tokenizer_qwen3_8_27b)
+            if qwen3_8_27b_few_shot_outputs is not None
+            else None
+        )
+        qwen_few_prompt_tokens = (
+            count_tokens(few_shot_prompt_text, tokenizer_qwen3_8_27b)
+            if qwen3_8_27b_few_shot_outputs is not None
+            else None
+        )
         qwen_few_reason_tokens = (
             count_tokens(qwen_few_shots_reasoning, tokenizer_qwen3_8_27b)
             if qwen_few_shots_reasoning is not None
@@ -1099,6 +1136,12 @@ def main() -> None:
             else None
         )
         if qwen3_8_27b_few_shot_outputs is not None:
+            token_stats["qwen3_8_27b_dynamic_few_shots"]["system"].append(
+                qwen_few_sys_tokens
+            )
+            token_stats["qwen3_8_27b_dynamic_few_shots"]["prompt"].append(
+                qwen_few_prompt_tokens
+            )
             token_stats["qwen3_8_27b_dynamic_few_shots"]["answer"].append(
                 qwen_few_ans_tokens
             )
@@ -1110,6 +1153,16 @@ def main() -> None:
             )
 
         # Step 3: Fine-Tuned Unmasked Baseline Model tokens
+        gemma4_merged_sys_tokens = (
+            count_tokens(rec["system"], tokenizer)
+            if merged_outputs is not None
+            else None
+        )
+        gemma4_merged_prompt_tokens = (
+            count_tokens(zero_shot_prompt_text, tokenizer)
+            if merged_outputs is not None
+            else None
+        )
         gemma4_merged_reason_tokens = (
             count_tokens(merged_adapter_8bit_reasoning, tokenizer)
             if merged_adapter_8bit_reasoning is not None
@@ -1126,6 +1179,12 @@ def main() -> None:
             else None
         )
         if merged_outputs is not None:
+            token_stats["gemma4_merged_adapter_8bit"]["system"].append(
+                gemma4_merged_sys_tokens
+            )
+            token_stats["gemma4_merged_adapter_8bit"]["prompt"].append(
+                gemma4_merged_prompt_tokens
+            )
             token_stats["gemma4_merged_adapter_8bit"]["answer"].append(
                 gemma4_merged_ans_tokens
             )
@@ -1137,6 +1196,16 @@ def main() -> None:
             )
 
         # Step 4: Fine-Tuned Masked Empty-Trace Model tokens
+        gemma4_masked_sys_tokens = (
+            count_tokens(rec["system"], tokenizer)
+            if masked_outputs is not None
+            else None
+        )
+        gemma4_masked_prompt_tokens = (
+            count_tokens(zero_shot_prompt_text, tokenizer)
+            if masked_outputs is not None
+            else None
+        )
         gemma4_masked_reason_tokens = (
             count_tokens(merged_adapter_8bit_masked_reasoning, tokenizer)
             if merged_adapter_8bit_masked_reasoning is not None
@@ -1153,6 +1222,12 @@ def main() -> None:
             else None
         )
         if masked_outputs is not None:
+            token_stats["gemma4_merged_adapter_8bit_masked"]["system"].append(
+                gemma4_masked_sys_tokens
+            )
+            token_stats["gemma4_merged_adapter_8bit_masked"]["prompt"].append(
+                gemma4_masked_prompt_tokens
+            )
             token_stats["gemma4_merged_adapter_8bit_masked"]["answer"].append(
                 gemma4_masked_ans_tokens
             )
@@ -1237,6 +1312,12 @@ def main() -> None:
             "assistant_tokens": assistant_gt_tokens,
             "assistant_metrics": assistant_metrics,
             # Step 1: Gemma 4 31B FP8 Dynamic Few-Shot + Thinking
+            "assistant_gemma4_31b_dynamic_few_shots_system_tokens": (
+                g4_31b_few_sys_tokens
+            ),
+            "assistant_gemma4_31b_dynamic_few_shots_prompt_tokens": (
+                g4_31b_few_prompt_tokens
+            ),
             "assistant_gemma4_31b_dynamic_few_shots_reasoning": (
                 g4_31b_few_shots_reasoning
             ),
@@ -1261,6 +1342,12 @@ def main() -> None:
                 g4_31b_few_shots_metrics
             ),
             # Step 2: Qwen 3.8 27B FP8 Dynamic Few-Shot + Thinking (medium effort)
+            "assistant_qwen3_8_27b_dynamic_few_shots_system_tokens": (
+                qwen_few_sys_tokens
+            ),
+            "assistant_qwen3_8_27b_dynamic_few_shots_prompt_tokens": (
+                qwen_few_prompt_tokens
+            ),
             "assistant_qwen3_8_27b_dynamic_few_shots_reasoning": (
                 qwen_few_shots_reasoning
             ),
@@ -1285,6 +1372,12 @@ def main() -> None:
                 qwen_few_shots_metrics
             ),
             # Step 3: Fine-Tuned Unmasked Baseline Model
+            "assistant_gemma4_merged_adapter_8bit_system_tokens": (
+                gemma4_merged_sys_tokens
+            ),
+            "assistant_gemma4_merged_adapter_8bit_prompt_tokens": (
+                gemma4_merged_prompt_tokens
+            ),
             "assistant_gemma4_merged_adapter_8bit": out_merged_adapter_8bit,
             "assistant_gemma4_merged_adapter_8bit_metrics": (
                 gemma4_merged_adapter_8bit_metrics
@@ -1301,6 +1394,12 @@ def main() -> None:
             ),
             "assistant_gemma4_merged_adapter_8bit_total_tokens": gemma4_merged_total_tokens,
             # Step 4: Fine-Tuned Masked Empty-Trace Model
+            "assistant_gemma4_merged_adapter_8bit_masked_system_tokens": (
+                gemma4_masked_sys_tokens
+            ),
+            "assistant_gemma4_merged_adapter_8bit_masked_prompt_tokens": (
+                gemma4_masked_prompt_tokens
+            ),
             "assistant_gemma4_merged_adapter_8bit_masked": out_merged_adapter_8bit_masked,
             "assistant_gemma4_merged_adapter_8bit_masked_metrics": (
                 gemma4_merged_adapter_8bit_masked_metrics
@@ -1457,21 +1556,31 @@ def main() -> None:
     def compute_avg_token_stats(stats_dict):
         if not stats_dict["total"]:
             return {
+                "total_system_tokens": 0,
+                "total_prompt_tokens": 0,
                 "total_reasoning_tokens": 0,
                 "total_answer_tokens": 0,
                 "total_tokens": 0,
+                "avg_system_tokens": 0.0,
+                "avg_prompt_tokens": 0.0,
                 "avg_reasoning_tokens": 0.0,
                 "avg_answer_tokens": 0.0,
                 "avg_total_tokens": 0.0,
             }
         n = len(stats_dict["total"])
+        tot_s = sum(stats_dict["system"])
+        tot_p = sum(stats_dict["prompt"])
         tot_r = sum(stats_dict["reasoning"])
         tot_a = sum(stats_dict["answer"])
         tot_t = sum(stats_dict["total"])
         return {
+            "total_system_tokens": tot_s,
+            "total_prompt_tokens": tot_p,
             "total_reasoning_tokens": tot_r,
             "total_answer_tokens": tot_a,
             "total_tokens": tot_t,
+            "avg_system_tokens": round(tot_s / n, 1),
+            "avg_prompt_tokens": round(tot_p / n, 1),
             "avg_reasoning_tokens": round(tot_r / n, 1),
             "avg_answer_tokens": round(tot_a / n, 1),
             "avg_total_tokens": round(tot_t / n, 1),
@@ -1511,22 +1620,22 @@ def main() -> None:
     if token_stats["gemma4_31b_dynamic_few_shots"]["total"]:
         st = token_summary["assistant_gemma4_31b_dynamic_few_shots"]
         print(
-            f"  * Step 1 (Gemma 4 31B Few-Shot) : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
+            f"  * Step 1 (Gemma 4 31B Few-Shot) : Avg System = {st['avg_system_tokens']} | Avg Prompt = {st['avg_prompt_tokens']} | Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
         )
     if token_stats["qwen3_8_27b_dynamic_few_shots"]["total"]:
         st = token_summary["assistant_qwen3_8_27b_dynamic_few_shots"]
         print(
-            f"  * Step 2 (Qwen 3.8 27B Few-Shot): Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
+            f"  * Step 2 (Qwen 3.8 27B Few-Shot): Avg System = {st['avg_system_tokens']} | Avg Prompt = {st['avg_prompt_tokens']} | Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
         )
     if token_stats["gemma4_merged_adapter_8bit"]["total"]:
         st = token_summary["assistant_gemma4_merged_adapter_8bit"]
         print(
-            f"  * Step 3 (Unmasked FT Baseline) : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
+            f"  * Step 3 (Unmasked FT Baseline) : Avg System = {st['avg_system_tokens']} | Avg Prompt = {st['avg_prompt_tokens']} | Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
         )
     if token_stats["gemma4_merged_adapter_8bit_masked"]["total"]:
         st = token_summary["assistant_gemma4_merged_adapter_8bit_masked"]
         print(
-            f"  * Step 4 (Masked Empty-Trace)   : Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
+            f"  * Step 4 (Masked Empty-Trace)   : Avg System = {st['avg_system_tokens']} | Avg Prompt = {st['avg_prompt_tokens']} | Avg Reasoning = {st['avg_reasoning_tokens']} | Avg Answer = {st['avg_answer_tokens']} | Avg Total = {st['avg_total_tokens']}"
         )
 
     print(f"  * Total Evaluation Time         : {overall_elapsed:.1f}s")
@@ -1620,6 +1729,20 @@ def main() -> None:
                 "speed_tokens_per_sec": (
                     assistant_gemma4_31b_dynamic_few_shots_speed
                 ),
+                "avg_system_tokens": (
+                    token_summary["assistant_gemma4_31b_dynamic_few_shots"][
+                        "avg_system_tokens"
+                    ]
+                    if token_stats["gemma4_31b_dynamic_few_shots"]["total"]
+                    else None
+                ),
+                "avg_prompt_tokens": (
+                    token_summary["assistant_gemma4_31b_dynamic_few_shots"][
+                        "avg_prompt_tokens"
+                    ]
+                    if token_stats["gemma4_31b_dynamic_few_shots"]["total"]
+                    else None
+                ),
                 "avg_reasoning_tokens": (
                     token_summary["assistant_gemma4_31b_dynamic_few_shots"][
                         "avg_reasoning_tokens"
@@ -1655,6 +1778,20 @@ def main() -> None:
                 ),
                 "speed_tokens_per_sec": (
                     assistant_qwen3_8_27b_dynamic_few_shots_speed
+                ),
+                "avg_system_tokens": (
+                    token_summary["assistant_qwen3_8_27b_dynamic_few_shots"][
+                        "avg_system_tokens"
+                    ]
+                    if token_stats["qwen3_8_27b_dynamic_few_shots"]["total"]
+                    else None
+                ),
+                "avg_prompt_tokens": (
+                    token_summary["assistant_qwen3_8_27b_dynamic_few_shots"][
+                        "avg_prompt_tokens"
+                    ]
+                    if token_stats["qwen3_8_27b_dynamic_few_shots"]["total"]
+                    else None
                 ),
                 "avg_reasoning_tokens": (
                     token_summary["assistant_qwen3_8_27b_dynamic_few_shots"][
@@ -1692,6 +1829,20 @@ def main() -> None:
                 "speed_tokens_per_sec": (
                     assistant_gemma4_merged_adapter_8bit_speed
                 ),
+                "avg_system_tokens": (
+                    token_summary["assistant_gemma4_merged_adapter_8bit"][
+                        "avg_system_tokens"
+                    ]
+                    if token_stats["gemma4_merged_adapter_8bit"]["total"]
+                    else None
+                ),
+                "avg_prompt_tokens": (
+                    token_summary["assistant_gemma4_merged_adapter_8bit"][
+                        "avg_prompt_tokens"
+                    ]
+                    if token_stats["gemma4_merged_adapter_8bit"]["total"]
+                    else None
+                ),
                 "avg_reasoning_tokens": (
                     token_summary["assistant_gemma4_merged_adapter_8bit"][
                         "avg_reasoning_tokens"
@@ -1727,6 +1878,20 @@ def main() -> None:
                 ),
                 "speed_tokens_per_sec": (
                     assistant_gemma4_merged_adapter_8bit_masked_speed
+                ),
+                "avg_system_tokens": (
+                    token_summary[
+                        "assistant_gemma4_merged_adapter_8bit_masked"
+                    ]["avg_system_tokens"]
+                    if token_stats["gemma4_merged_adapter_8bit_masked"]["total"]
+                    else None
+                ),
+                "avg_prompt_tokens": (
+                    token_summary[
+                        "assistant_gemma4_merged_adapter_8bit_masked"
+                    ]["avg_prompt_tokens"]
+                    if token_stats["gemma4_merged_adapter_8bit_masked"]["total"]
+                    else None
                 ),
                 "avg_reasoning_tokens": (
                     token_summary[
