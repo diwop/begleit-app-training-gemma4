@@ -46,3 +46,41 @@ stages:
       - data/few_shots_dialogs_full_3.jsonl
       - data/few_shots_dialogs_full_4.jsonl
       - data/few_shots_dialogs_full_5.jsonl
+
+  prepare_data_dialogs_unidirectional:
+    cmd: python3 src-train/prepare_data_dialogs_unidirectional.py
+    deps:
+      - prompts/system-prompt_dialogs_unidirectional.md
+      - prompts/prompt-template_dialogs_unidirectional.md
+      - data/raw_dialogs
+      - src-train/prepare_data_dialogs_unidirectional.py
+    outs:
+      - data/dataset_train_dialogs_unidirectional.jsonl
+      - data/dataset_eval_dialogs_unidirectional.jsonl
+
+  prepare_few_shots_dialogs_unidirectional:
+    cmd: python3 src-eval/prepare_few_shots_dialogs_unidirectional.py
+    deps:
+      - prompts/prompt-template-dynamic-few-shots_dialogs_sample_unidirectional.md
+      - data/raw_dialogs
+      - src-eval/prepare_few_shots_dialogs_unidirectional.py
+    outs:
+      - data/few_shots_dialogs_unidirectional_train_0.jsonl
+      - data/few_shots_dialogs_unidirectional_train_1.jsonl
+      - data/few_shots_dialogs_unidirectional_train_2.jsonl
+      - data/few_shots_dialogs_unidirectional_train_3.jsonl
+      - data/few_shots_dialogs_unidirectional_train_4.jsonl
+      - data/few_shots_dialogs_unidirectional_train_5.jsonl
+      - data/few_shots_dialogs_unidirectional_eval_0.jsonl
+      - data/few_shots_dialogs_unidirectional_eval_1.jsonl
+      - data/few_shots_dialogs_unidirectional_eval_2.jsonl
+      - data/few_shots_dialogs_unidirectional_eval_3.jsonl
+      - data/few_shots_dialogs_unidirectional_eval_4.jsonl
+      - data/few_shots_dialogs_unidirectional_eval_5.jsonl
+      - data/few_shots_dialogs_unidirectional_full_0.jsonl
+      - data/few_shots_dialogs_unidirectional_full_1.jsonl
+      - data/few_shots_dialogs_unidirectional_full_2.jsonl
+      - data/few_shots_dialogs_unidirectional_full_3.jsonl
+      - data/few_shots_dialogs_unidirectional_full_4.jsonl
+      - data/few_shots_dialogs_unidirectional_full_5.jsonl
+

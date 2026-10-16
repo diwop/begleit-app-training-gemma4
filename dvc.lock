@@ -149,3 +149,124 @@ stages:
       hash: md5
       md5: 2a46e53ec73fce46315e62886be36f66
       size: 3011411
+  prepare_data_dialogs_unidirectional:
+    cmd: python3 src-train/prepare_data_dialogs_unidirectional.py
+    deps:
+    - path: data/raw_dialogs
+      hash: md5
+      md5: 39f8027856df73e601057bcece5d235a.dir
+      size: 943269
+      nfiles: 257
+    - path: prompts/prompt-template_dialogs_unidirectional.md
+      hash: md5
+      md5: b6e15f80bfe8b6ec9d08bdee3acc0b29
+      size: 278
+    - path: prompts/system-prompt_dialogs_unidirectional.md
+      hash: md5
+      md5: 5f0e875c26449b32bc232fc6ada3e5e8
+      size: 6936
+    - path: src-train/prepare_data_dialogs_unidirectional.py
+      hash: md5
+      md5: 1cdf22b972c6025343334ae142439d49
+      size: 21962
+      isexec: true
+    outs:
+    - path: data/dataset_eval_dialogs_unidirectional.jsonl
+      hash: md5
+      md5: 409200b18100f24c8458c4fa54b22b92
+      size: 5467421
+    - path: data/dataset_train_dialogs_unidirectional.jsonl
+      hash: md5
+      md5: d4e76da65563150c1ff2038c7adb9206
+      size: 26469304
+  prepare_few_shots_dialogs_unidirectional:
+    cmd: python3 src-eval/prepare_few_shots_dialogs_unidirectional.py
+    deps:
+    - path: data/raw_dialogs
+      hash: md5
+      md5: 39f8027856df73e601057bcece5d235a.dir
+      size: 943269
+      nfiles: 257
+    - path: 
+        prompts/prompt-template-dynamic-few-shots_dialogs_sample_unidirectional.md
+      hash: md5
+      md5: 41470afd426e33bbeee4023a75a452c7
+      size: 234
+    - path: src-eval/prepare_few_shots_dialogs_unidirectional.py
+      hash: md5
+      md5: cfeadac63289add88ecedc1f96916bef
+      size: 11774
+      isexec: true
+    outs:
+    - path: data/few_shots_dialogs_unidirectional_eval_0.jsonl
+      hash: md5
+      md5: 778dbf242b25556662b49d0d7a82c56f
+      size: 34792
+    - path: data/few_shots_dialogs_unidirectional_eval_1.jsonl
+      hash: md5
+      md5: f10f8c0f5052ac2f929ae67de8efd478
+      size: 61301
+    - path: data/few_shots_dialogs_unidirectional_eval_2.jsonl
+      hash: md5
+      md5: 65a5457b1a760ceb050d58cbd4b806a2
+      size: 94020
+    - path: data/few_shots_dialogs_unidirectional_eval_3.jsonl
+      hash: md5
+      md5: be51f9a111563bcb3a3221657f110565
+      size: 118636
+    - path: data/few_shots_dialogs_unidirectional_eval_4.jsonl
+      hash: md5
+      md5: 585ed1f2214d10c1b42af22091859df0
+      size: 143506
+    - path: data/few_shots_dialogs_unidirectional_eval_5.jsonl
+      hash: md5
+      md5: 10ecc675fb7494d5be5f409ce0d1f06e
+      size: 335120
+    - path: data/few_shots_dialogs_unidirectional_full_0.jsonl
+      hash: md5
+      md5: 299adbe771c7146120bdc95f386d25dd
+      size: 313816
+    - path: data/few_shots_dialogs_unidirectional_full_1.jsonl
+      hash: md5
+      md5: 0c75c79b1449381af425443f1e4b65e3
+      size: 558980
+    - path: data/few_shots_dialogs_unidirectional_full_2.jsonl
+      hash: md5
+      md5: 151ff3959cf8ab607d3786702fcfe2dd
+      size: 819800
+    - path: data/few_shots_dialogs_unidirectional_full_3.jsonl
+      hash: md5
+      md5: cdbbfc5c21fc53fd01f7b161a64cf6a4
+      size: 1057788
+    - path: data/few_shots_dialogs_unidirectional_full_4.jsonl
+      hash: md5
+      md5: d52396ee2b23116f7bf3e8acdc247c33
+      size: 1252448
+    - path: data/few_shots_dialogs_unidirectional_full_5.jsonl
+      hash: md5
+      md5: 28127102b035f2b6f8ba5a3521cb0739
+      size: 3257959
+    - path: data/few_shots_dialogs_unidirectional_train_0.jsonl
+      hash: md5
+      md5: 9e650d5d0459349ac28b5dc0150967f5
+      size: 279024
+    - path: data/few_shots_dialogs_unidirectional_train_1.jsonl
+      hash: md5
+      md5: accae5f2d6eacc66b4b82de358c536ee
+      size: 497679
+    - path: data/few_shots_dialogs_unidirectional_train_2.jsonl
+      hash: md5
+      md5: 08cd59b9661c20ed764187e6af5cfeda
+      size: 725780
+    - path: data/few_shots_dialogs_unidirectional_train_3.jsonl
+      hash: md5
+      md5: 9b75c23463bb6a7801325c2c87761598
+      size: 939152
+    - path: data/few_shots_dialogs_unidirectional_train_4.jsonl
+      hash: md5
+      md5: 6edd294882f945383f29954344db318e
+      size: 1108942
+    - path: data/few_shots_dialogs_unidirectional_train_5.jsonl
+      hash: md5
+      md5: 378685a74600998c451af3e6017a72ea
+      size: 2922839
